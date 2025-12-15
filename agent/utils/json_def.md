@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the JSON interface format for OpenSearch statistical analysis. This interface allows users to perform complex data statistical analysis through simple JSON configuration, including descriptive statistics, frequency analysis, and cross-analysis.
+This document defines the JSON interface format for OpenSearch statistical analysis. This interface allows users to perform complex data statistical analysis through simple JSON configuration, including descriptive statistics, frequency analysis, cross-analysis, and range analysis.
 
 ---
 
@@ -17,7 +17,10 @@ This document defines the JSON interface format for OpenSearch statistical analy
       "fields": [],
       "group_by": [],
       "filters": [],
-      "metrics": []
+      "metrics": [],
+      "bucket_ranges": [],
+      "ranges": [],
+      "field": ""
     }
   }
 }
@@ -28,10 +31,14 @@ This document defines the JSON interface format for OpenSearch statistical analy
 |-------|------|----------|-------------|
 | `query.type` | string | Yes | Query type, supported values in Section 2 |
 | `query.config` | object | Yes | Query configuration object |
-| `query.config.fields` | string[] | Yes | List of fields to analyze |
+| `query.config.fields` | string[] | Conditional | List of fields to analyze (depends on query type) |
 | `query.config.group_by` | string[] | No | List of grouping fields |
 | `query.config.filters` | object[] | No | Array of filter conditions |
 | `query.config.metrics` | string[] | No | Array of statistical metrics |
+| `query.config.bucket_ranges` | object[] | No | Custom bucket ranges for range analysis |
+| `query.config.ranges` | object[] | Conditional | Range definitions for range_analysis type |
+| `query.config.field` | string | Conditional | Target field for range_analysis type |
+| `query.config.metrics_field` | string | No | Field for metric calculations |
 
 ---
 
@@ -41,14 +48,18 @@ This document defines the JSON interface format for OpenSearch statistical analy
 
 | Type | Value | Description |
 |------|-------|-------------|
-| Descriptive Statistics | `"descriptive_stats"` | Statistical analysis for numerical fields (min, max, median, quartiles, etc.) |
-| Frequency Analysis | `"frequency_analysis"` | Frequency analysis for categorical fields (count, proportion, etc.) |
-| Cross Analysis | `"cross_analysis"` | Combined analysis supporting grouped statistics and cross-tabulation |
+| Descriptive Statistics | `"descriptive_stats"` | Basic statistical analysis for numerical fields (min, max, median, Q1, Q3, etc.) |
+| Complete Statistics | `"complete_stats"` | Comprehensive statistical analysis including all metrics (Q5, std_deviation, variance, mode, etc.) |
+| Frequency Analysis | `"frequency_analysis"` | Frequency analysis for categorical fields |
+| Cross Analysis | `"cross_analysis"` | Combined analysis supporting grouped statistics, custom buckets, and percentages |
+| Range Analysis | `"range_analysis"` | Analysis with custom range buckets (e.g., age groups) |
 
 ### 2.2 Type Selection Guide
-- **Numerical field analysis** → Use `descriptive_stats`
+- **Basic numerical field analysis** → Use `descriptive_stats`
+- **Comprehensive numerical analysis with all percentiles** → Use `complete_stats`
 - **Categorical field distribution** → Use `frequency_analysis`
-- **Grouped comparative analysis** → Use `cross_analysis`
+- **Grouped comparative analysis with custom buckets** → Use `cross_analysis`
+- **Custom range grouping (e.g., age groups)** → Use `range_analysis`
 
 ---
 
@@ -63,9 +74,10 @@ This document defines the JSON interface format for OpenSearch statistical analy
 
 #### Description
 - **Type**: String array
-- **Required**: Yes
+- **Required**: Yes (for descriptive_stats, complete_stats, frequency_analysis, cross_analysis)
+- **Required**: No (for range_analysis)
 - **Purpose**: Specifies field names to analyze
-- **Constraints**: Must contain at least one field
+- **Constraints**: Must contain at least one field (where required)
 
 #### Example
 ```json
@@ -116,7 +128,11 @@ This document defines the JSON interface format for OpenSearch statistical analy
 | Less than or equal | `"lte"` | Field less than or equal to specified value | Number/Date | `"value": "2023-12-31"` |
 | In | `"in"` | Field value is in specified list | Array | `"value": ["A", "B", "C"]` |
 | Range | `"range"` | Field is within specified range | Object | `"value": {"gte": 10, "lte": 20}` |
-| Wildcard match | `"like"` | Wildcard pattern matching | String | `"value": "张*"` |
+| Wildcard match | `"like"` | SQL LIKE pattern matching | String | `"value": "张%"` |
+| Exists | `"exists"` | Field exists (not null) | None | No value needed |
+| Missing | `"missing"` | Field is missing or null | None | No value needed |
+| Wildcard | `"wildcard"` | Wildcard pattern matching | String | `"value": "张*"` |
+| Regexp | `"regexp"` | Regular expression matching | String | `"value": "张.*"` |
 
 #### 3.3.2 Filter Examples
 
@@ -146,6 +162,10 @@ This document defines the JSON interface format for OpenSearch statistical analy
     "field": "city",
     "operator": "in",
     "value": ["Beijing", "Shanghai", "Guangzhou", "Shenzhen"]
+  },
+  {
+    "field": "name",
+    "operator": "exists"
   }
 ]
 ```
@@ -171,25 +191,82 @@ This document defines the JSON interface format for OpenSearch statistical analy
 
 #### Supported Metrics List
 
-| Metric | Value | Description | Applicable Types |
-|--------|-------|-------------|------------------|
-| Count | `"count"` | Number of documents | All types |
-| Cardinality | `"cardinality"` | Number of unique values | Categorical fields |
-| Minimum | `"min"` | Minimum value | Numerical fields |
-| Maximum | `"max"` | Maximum value | Numerical fields |
-| Average | `"avg"` | Average value | Numerical fields |
-| Sum | `"sum"` | Sum of values | Numerical fields |
-| Percentage | `"percentage"` | Percentage of total | Grouped statistics |
-| Median | `"median"` | Median (50th percentile) | Numerical fields |
-| First quartile | `"q1"` | First quartile (25th percentile) | Numerical fields |
-| Third quartile | `"q3"` | Third quartile (75th percentile) | Numerical fields |
-| Standard deviation | `"std_deviation"` | Standard deviation | Numerical fields |
-| Variance | `"variance"` | Variance | Numerical fields |
+| Metric | Value | Description | Applicable Types | Available in Types |
+|--------|-------|-------------|------------------|-------------------|
+| Count | `"count"` | Number of documents | All types | All |
+| Cardinality | `"cardinality"` | Number of unique values | Categorical fields | descriptive_stats, complete_stats, cross_analysis |
+| Minimum | `"min"` | Minimum value | Numerical fields | descriptive_stats, complete_stats |
+| Maximum | `"max"` | Maximum value | Numerical fields | descriptive_stats, complete_stats |
+| Average | `"avg"` | Average value | Numerical fields | descriptive_stats, complete_stats, range_analysis |
+| Sum | `"sum"` | Sum of values | Numerical fields | descriptive_stats, complete_stats, range_analysis |
+| Percentage | `"percentage"` | Percentage of total | Grouped statistics | cross_analysis, frequency_analysis |
+| Median | `"median"` | Median (50th percentile) | Numerical fields | descriptive_stats, complete_stats |
+| First quartile | `"q1"` | First quartile (25th percentile) | Numerical fields | descriptive_stats, complete_stats |
+| Fifth percentile | `"q5"` | Fifth percentile | Numerical fields | complete_stats |
+| Third quartile | `"q3"` | Third quartile (75th percentile) | Numerical fields | descriptive_stats, complete_stats |
+| Standard deviation | `"std_deviation"` | Standard deviation | Numerical fields | complete_stats |
+| Variance | `"variance"` | Variance | Numerical fields | complete_stats |
+| Mode | `"mode"` | Most frequent value | All types | complete_stats |
 
-#### Notes
-- If `metrics` is not specified, the system automatically selects based on field type
-- Numerical fields: Default includes `min`, `max`, `avg`, `median`, `q1`, `q3`
-- Categorical fields: Default includes `count`, `cardinality`
+#### Default Metrics by Query Type
+- **descriptive_stats**: `["min", "max", "avg", "count", "q1", "median", "q3"]`
+- **complete_stats**: All available metrics
+- **frequency_analysis**: `["count", "percentage"]`
+- **cross_analysis**: `["count", "percentage"]`
+- **range_analysis**: `["count"]`
+
+### 3.5 bucket_ranges Parameter (for cross_analysis)
+
+#### Definition
+```json
+"bucket_ranges": [
+  {
+    "field": "string",      // Field name for range bucket
+    "ranges": [            // Range definitions
+      {
+        "key": "string",   // Range label
+        "from": number,    // Start value (inclusive)
+        "to": number       // End value (exclusive)
+      }
+    ],
+    "type": "range"        // Always "range"
+  }
+]
+```
+
+#### Example
+```json
+"bucket_ranges": [
+  {
+    "field": "age",
+    "ranges": [
+      {"key": "young", "from": 0, "to": 30},
+      {"key": "middle", "from": 30, "to": 60},
+      {"key": "old", "from": 60}
+    ],
+    "type": "range"
+  }
+]
+```
+
+### 3.6 ranges and field Parameters (for range_analysis)
+
+#### Definition
+```json
+{
+  "field": "age",  // Field to create ranges on
+  "ranges": [     // Range definitions
+    {"key": "0-20", "from": 0, "to": 20},
+    {"key": "20-40", "from": 20, "to": 40}
+  ],
+  "metrics_field": "income"  // Optional: Field for metric calculations
+}
+```
+
+#### Description
+- **field**: Required for range_analysis, the field to create custom ranges on
+- **ranges**: Required for range_analysis, array of range definitions
+- **metrics_field**: Optional, field to calculate metrics (avg, sum) within each range
 
 ---
 
@@ -197,7 +274,7 @@ This document defines the JSON interface format for OpenSearch statistical analy
 
 ### 4.1 Descriptive Statistics
 
-**Function**: Analyze basic statistical information of numerical fields
+**Function**: Basic statistical analysis of numerical fields
 
 ```json
 {
@@ -216,24 +293,45 @@ This document defines the JSON interface format for OpenSearch statistical analy
           "operator": "gte",
           "value": "2020-01-01"
         }
-      ],
-      "metrics": ["min", "max", "avg", "median", "q1", "q3"]
+      ]
     }
   }
 }
 ```
 
-**Output Field Description:**
-- For each field, returns:
-  - `count`: Number of documents
-  - `min`: Minimum value
-  - `max`: Maximum value
-  - `avg`: Average value
-  - `q1`: First quartile
-  - `median`: Median
-  - `q3`: Third quartile
+**Output Includes**: count, min, max, avg, sum, q1, median, q3, std_deviation, variance, mode, cardinality
 
-### 4.2 Frequency Analysis
+### 4.2 Complete Statistics
+
+**Function**: Comprehensive statistical analysis with all percentiles
+
+```json
+{
+  "query": {
+    "type": "complete_stats",
+    "config": {
+      "fields": ["age", "blood_pressure", "cholesterol"],
+      "metrics": ["min", "max", "avg", "median", "q1", "q5", "q3", "std_deviation", "mode"],
+      "filters": [
+        {
+          "field": "gender",
+          "operator": "eq",
+          "value": "male"
+        },
+        {
+          "field": "age",
+          "operator": "range",
+          "value": {"gte": 18, "lte": 80}
+        }
+      ]
+    }
+  }
+}
+```
+
+**Output Includes**: All specified metrics including Q5 (5th percentile)
+
+### 4.3 Frequency Analysis
 
 **Function**: Analyze distribution of categorical fields
 
@@ -257,35 +355,39 @@ This document defines the JSON interface format for OpenSearch statistical analy
 }
 ```
 
-**Output Description:**
+**Output Description**:
 - Grouped by department
-- Within each department, statistics for:
-  - Distribution of education levels
-  - Distribution of job titles
-  - Includes count and percentage
+- Within each department, statistics for education levels and job titles
+- Includes count and percentage
 
-### 4.3 Cross Analysis
+### 4.4 Cross Analysis with Custom Buckets
 
-**Function**: Complex grouped statistical analysis (e.g., disease proportions)
+**Function**: Advanced grouped analysis with custom range buckets
 
 ```json
 {
   "query": {
     "type": "cross_analysis",
     "config": {
-      "fields": ["has_disease", "smoking_status", "exercise_frequency"],
-      "group_by": ["age_group", "gender"],
-      "metrics": ["count", "percentage", "avg"],
+      "fields": ["has_disease", "treatment_type"],
+      "group_by": ["gender"],
+      "bucket_ranges": [
+        {
+          "field": "age",
+          "ranges": [
+            {"key": "young", "from": 0, "to": 30},
+            {"key": "middle", "from": 30, "to": 60},
+            {"key": "old", "from": 60}
+          ],
+          "type": "range"
+        }
+      ],
+      "metrics": ["count", "percentage"],
       "filters": [
         {
-          "field": "checkup_year",
+          "field": "test_date",
           "operator": "gte",
-          "value": 2022
-        },
-        {
-          "field": "region",
-          "operator": "in",
-          "value": ["east", "south"]
+          "value": "2023-01-01"
         }
       ]
     }
@@ -293,17 +395,54 @@ This document defines the JSON interface format for OpenSearch statistical analy
 }
 ```
 
-**Use Case Example:**
-1. Among different age groups and genders:
-   - Proportion with and without disease
-   - Smoking status distribution
-   - Average exercise frequency
+**Analysis Flow**:
+1. First group by age ranges (young, middle, old)
+2. Within each age range, group by gender
+3. Within each gender group, analyze disease status and treatment type
+4. Calculate count and percentage for each combination
+
+### 4.5 Range Analysis (Age Group Disease Ratio)
+
+**Function**: Analyze disease ratios by custom age groups
+
+```json
+{
+  "query": {
+    "type": "range_analysis",
+    "config": {
+      "field": "age",
+      "ranges": [
+        {"key": "0-20", "from": 0, "to": 20},
+        {"key": "20-40", "from": 20, "to": 40},
+        {"key": "40-60", "from": 40, "to": 60},
+        {"key": "60-80", "from": 60, "to": 80},
+        {"key": "80+", "from": 80}
+      ],
+      "group_by": ["has_disease", "disease_type"],
+      "metrics_field": "age",
+      "metrics": ["count", "avg"],
+      "filters": [
+        {
+          "field": "test_date",
+          "operator": "gte",
+          "value": "2023-01-01"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Output Structure**:
+- Each age group (0-20, 20-40, etc.)
+- Within each group, breakdown by disease status and disease type
+- For each subgroup: count and average age
 
 ---
 
 ## 5. Response Format
 
-### 5.1 Descriptive Statistics Response Format
+### 5.1 Descriptive/Complete Statistics Response
 ```json
 {
   "age": {
@@ -313,82 +452,71 @@ This document defines the JSON interface format for OpenSearch statistical analy
     "avg": 45.5,
     "sum": 45500,
     "q1": 30.0,
+    "q5": 25.0,
     "median": 45.0,
-    "q3": 60.0
-  },
-  "income": {
-    "count": 1000,
-    "min": 3000,
-    "max": 50000,
-    "avg": 15000.5,
-    "sum": 15000500,
-    "q1": 8000.0,
-    "median": 12000.0,
-    "q3": 20000.0
+    "q3": 60.0,
+    "std_deviation": 15.2,
+    "variance": 231.04,
+    "mode": 35,
+    "mode_count": 120,
+    "cardinality": 63
   }
 }
 ```
 
-### 5.2 Frequency Analysis Response Format
+### 5.2 Frequency/Cross Analysis Response
 ```json
 {
   "buckets": [
     {
       "key": "engineering",
       "doc_count": 200,
+      "level": 0,
       "education_level": {
         "buckets": [
           {
             "key": "bachelor",
             "doc_count": 120,
-            "percentage": 60.0
-          },
-          {
-            "key": "master",
-            "doc_count": 60,
-            "percentage": 30.0
-          },
-          {
-            "key": "phd",
-            "doc_count": 20,
-            "percentage": 10.0
+            "percentage": 60.0,
+            "level": 1
           }
         ]
-      }
+      },
+      "children": [
+        {
+          "key": "development",
+          "doc_count": 150,
+          "level": 1,
+          "parent_key": "engineering"
+        }
+      ]
     }
   ]
 }
 ```
 
-### 5.3 Cross Analysis Response Format
+### 5.3 Range Analysis Response
 ```json
 {
-  "buckets": [
+  "ranges": [
     {
-      "key": "18-30",
+      "key": "20-40",
+      "from": 20,
+      "to": 40,
       "doc_count": 300,
-      "gender": {
-        "buckets": [
-          {
-            "key": "male",
-            "doc_count": 150,
-            "has_disease": {
-              "buckets": [
-                {
-                  "key": true,
-                  "doc_count": 30,
-                  "percentage": 20.0
-                },
-                {
-                  "key": false,
-                  "doc_count": 120,
-                  "percentage": 80.0
-                }
-              ]
-            }
-          }
-        ]
-      }
+      "avg": 32.5,
+      "groups": [
+        {
+          "key": "true",
+          "doc_count": 60,
+          "avg": 35.2
+        },
+        {
+          "key": "false",
+          "doc_count": 240,
+          "avg": 31.8
+        }
+      ]
     }
   ]
 }
@@ -396,92 +524,67 @@ This document defines the JSON interface format for OpenSearch statistical analy
 
 ---
 
-## 6. Advanced Features
+## 7. Error Handling and Validation
 
-### 6.1 Compound Filter Conditions
-Supports AND and OR logic:
-```json
-"filters": [
-  {
-    "bool": "and",  // or "or"
-    "conditions": [
-      {
-        "field": "age",
-        "operator": "gte",
-        "value": 18
-      },
-      {
-        "field": "age",
-        "operator": "lte",
-        "value": 60
-      }
-    ]
-  }
-]
-```
+### 7.1 Common Error Types
+| Error Type | Cause | Solution |
+|------------|-------|----------|
+| Missing required field | Required parameter not provided | Check query structure |
+| Invalid operator | Unsupported operator used | Use only supported operators |
+| Type mismatch | Value type doesn't match field type | Ensure value type compatibility |
+| Empty result | No documents match filters | Broaden filter criteria |
+| Timeout | Query too complex or data too large | Add more filters, reduce fields |
 
-### 6.2 Sorting Configuration
-```json
-"sort": [
-  {
-    "field": "doc_count",
-    "order": "desc"  // "asc" or "desc"
-  }
-]
-```
-
-### 6.3 Pagination Support
-```json
-"pagination": {
-  "page": 1,
-  "size": 20
-}
-```
+### 7.2 Validation Rules
+1. **Field existence**: Fields must exist in the index mapping
+2. **Type compatibility**: Operators must be compatible with field types
+3. **Range validity**: Range `from` must be less than `to` (if both specified)
+4. **Array limits**: Maximum 10 fields, 3 group levels recommended
+5. **Pagination**: Page must be ≥ 1, size must be ≤ 1000
 
 ---
 
-## 7. Important Notes
+## 8. Performance Considerations
 
-### 7.1 Performance Considerations
-1. **Number of fields**: Recommended not to exceed 10 analysis fields per query
-2. **Grouping levels**: Recommended not to exceed 3 grouping levels
-3. **Data volume**: For large datasets, consider adding time range filters
-4. **Pagination**: Use pagination for large result sets
+### 8.1 Optimization Guidelines
+1. **Indexing Strategy**:
+   - Ensure numerical fields are indexed as appropriate types
+   - Use keyword type for categorical fields used in group_by
+   - Create composite indices for frequently queried combinations
 
-### 7.2 Data Type Recommendations
-| Analysis Type | Recommended Field Types | Not Recommended |
-|---------------|------------------------|-----------------|
-| Descriptive Statistics | Numerical (integer, float, date) | Text (non-numerical) |
-| Frequency Analysis | Categorical fields (keyword, enum) | Long text (text) |
-| Cross Analysis | Any type, but consider data distribution | High-cardinality fields |
+2. **Query Design**:
+   - Always include relevant filters to reduce dataset size
+   - Use range queries instead of multiple OR conditions
+   - Limit the number of aggregation levels
+   - Set appropriate size limits for terms aggregations
 
-### 7.3 Error Handling
-- Non-existent field: Returns error message
-- Type mismatch: Automatically skips or converts types
-- Memory limits: Returns pagination suggestions
-- Timeout: Suggests adding more filter conditions
+3. **Resource Management**:
+   - Monitor aggregation memory usage
+   - Use pagination for large result sets
+   - Consider time-based partitioning for time-series data
 
-### 7.4 Best Practices
-1. **Define requirements clearly**: Determine analysis goals before designing queries
-2. **Build incrementally**: Start with simple queries, gradually increase complexity
-3. **Use filters**: Add filter conditions to reduce dataset size whenever possible
-4. **Monitor performance**: Pay attention to query response time and resource usage
-5. **Cache results**: Consider caching results for frequently executed queries
+### 8.2 Recommended Limits
+| Parameter | Recommended Limit | Hard Limit |
+|-----------|------------------|------------|
+| Fields per query | 5-10 | 20 |
+| Group levels | 2-3 | 5 |
+| Filters | 5-10 | 20 |
+| Buckets per aggregation | 100-1000 | 10000 |
+| Page size | 10-100 | 1000 |
 
 ---
+
 
 ## Summary
 
-This JSON interface provides powerful and flexible statistical analysis capabilities. Complex data analysis requirements can be implemented through simple configuration. The interface design follows these principles:
+This enhanced JSON interface provides comprehensive statistical analysis capabilities for OpenSearch. Key features include:
 
-1. **Easy to use**: Define queries through intuitive JSON structure
-2. **Flexible and extensible**: Supports multiple query types and operators
-3. **Performance optimized**: Makes reasonable use of OpenSearch native features
-4. **Type safe**: Clear data types and validation rules
-5. **Well-documented**: Detailed error handling and best practices
+1. **Complete Statistical Suite**: Support for all common statistical measures including Q1, Q3, Q5, median, mode, std deviation, and variance
+2. **Flexible Range Analysis**: Custom range buckets for any numerical field (e.g., age groups, income brackets)
+3. **Advanced Filtering**: 12 different filter operators including regex, wildcard, exists, and missing
+4. **Hierarchical Aggregation**: Multi-level grouping with unlimited nesting
+5. **Percentage Calculations**: Built-in percentage calculations for grouped data
+6. **Pagination Support**: Built-in pagination for large result sets
+7. **Type Safety**: Strong type checking and validation
+8. **Performance Optimized**: Intelligent query construction with performance considerations
 
-Through this interface, users can:
-- Quickly implement various statistical analysis requirements
-- Avoid writing complex OpenSearch DSL
-- Receive structured, easy-to-understand results
-- Easily integrate with various data analysis applications
