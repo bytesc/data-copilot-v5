@@ -310,35 +310,7 @@ class OpenSearchQueryTranslator:
             current_agg[f"{field}_terms"] = {
                 "terms": {"field": field, "size": 100}
             }
-
-            # 如果需要百分比，添加bucket_script
-            if "percentage" in metrics:
-                if len(group_by) > 0 or bucket_ranges:
-                    # 有分组时，计算相对于父级的百分比
-                    current_agg[f"{field}_terms"]["aggs"] = {
-                        "percentage": {
-                            "bucket_script": {
-                                "buckets_path": {
-                                    "count": "_count",
-                                    "total": "_parent._count"
-                                },
-                                "script": "params.count / params.total * 100"
-                            }
-                        }
-                    }
-                else:
-                    # 无分组时，计算相对于总数的百分比
-                    current_agg[f"{field}_terms"]["aggs"] = {
-                        "percentage": {
-                            "bucket_script": {
-                                "buckets_path": {
-                                    "count": "_count",
-                                    "total": "_count"
-                                },
-                                "script": "params.count / params.total * 100"
-                            }
-                        }
-                    }
+            # 不在这里计算百分比，而是在后处理中计算
 
         return aggs
 
@@ -523,14 +495,24 @@ class OpenSearchQueryTranslator:
     def _format_aggregation_result(self, es_result: Dict[str, Any]) -> Dict[str, Any]:
         """格式化聚合结果"""
 
-        def process_buckets(buckets, level=0, parent_key=None, parent_path=""):
+        def process_buckets(buckets, level=0, parent_key=None, parent_path="", total_count=None):
             results = []
+
+            # 如果没有传入total_count，则计算当前级别的总数
+            if total_count is None:
+                total_count = sum(bucket.get("doc_count", 0) for bucket in buckets.get("buckets", []))
+
             for bucket in buckets.get("buckets", []):
                 result = {
                     "key": bucket.get("key"),
                     "doc_count": bucket.get("doc_count"),
                     "level": level
                 }
+
+                # 计算百分比
+                if total_count > 0:
+                    result["percentage"] = (bucket.get("doc_count", 0) / total_count) * 100
+
                 if parent_key is not None:
                     result["parent_key"] = parent_key
                 if parent_path:
@@ -544,7 +526,8 @@ class OpenSearchQueryTranslator:
                                 # 嵌套聚合
                                 result["children"] = process_buckets(
                                     value, level + 1, bucket.get("key"),
-                                    f"{parent_path}.{bucket.get('key')}" if parent_path else str(bucket.get("key"))
+                                    f"{parent_path}.{bucket.get('key')}" if parent_path else str(bucket.get("key")),
+                                    bucket.get("doc_count")  # 父级的doc_count作为总数
                                 )
                             elif "value" in value:
                                 # 聚合值
@@ -562,6 +545,12 @@ class OpenSearchQueryTranslator:
                                         "to": range_bucket.get("to"),
                                         "doc_count": range_bucket.get("doc_count")
                                     }
+                                    # 计算范围桶的百分比
+                                    range_total = sum(rb.get("doc_count", 0) for rb in value.get("buckets", []))
+                                    if range_total > 0:
+                                        range_result["percentage"] = (range_bucket.get("doc_count",
+                                                                                       0) / range_total) * 100
+
                                     # 处理范围内的子聚合
                                     for sub_key, sub_value in range_bucket.items():
                                         if sub_key not in ["key", "from", "to", "doc_count", "key_as_string"]:
@@ -570,13 +559,10 @@ class OpenSearchQueryTranslator:
                                                     sub_value, level + 1,
                                                     f"{bucket.get('key')}:{range_bucket.get('key')}",
                                                     f"{parent_path}.{bucket.get('key')}.{range_bucket.get('key')}"
-                                                    if parent_path else f"{bucket.get('key')}.{range_bucket.get('key')}"
+                                                    if parent_path else f"{bucket.get('key')}.{range_bucket.get('key')}",
+                                                    range_bucket.get("doc_count")
                                                 )
                                     result["ranges"].append(range_result)
-
-                # 处理percentage计算
-                if "percentage" in bucket:
-                    result["percentage"] = bucket["percentage"]["value"]
 
                 results.append(result)
             return results
