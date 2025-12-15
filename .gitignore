@@ -1,5 +1,6 @@
 .idea
 __pycache__/
+.pytest_cache
 
 *.log
 api_key_openai.txt
