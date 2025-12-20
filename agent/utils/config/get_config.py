@@ -3,8 +3,7 @@ import yaml
 config_data = None
 
 # 读取YAML文件
-# '../config/config.yaml'
-with open('.agent/utils/config/config.yaml', 'r') as stream:
+with open('agent/utils/config/config.yaml', 'r') as stream:
     try:
         config_data = yaml.safe_load(stream)
         print(config_data)
