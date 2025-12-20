@@ -97,17 +97,6 @@ class OpenSearchJsonTranslator:
 
         # 为每个字段创建独立的聚合
         for field in fields:
-            field_metrics = []
-
-            # 检查是否需要特殊聚合类型
-            has_percentiles = any(metric in ['median', 'q1', 'q3', 'q5'] for metric in metrics)
-            has_extended_stats = any(metric in ['std_deviation', 'variance'] for metric in metrics)
-            has_mode = 'mode' in metrics
-
-            # 基本统计指标
-            basic_metrics = [metric for metric in metrics if metric in ['min', 'max', 'avg', 'sum', 'count']]
-
-            # 如果只需要基本统计，使用stats聚合（更高效）
             if (set(metrics) == {'min', 'max', 'avg', 'count'} or
                     set(metrics) == {'min', 'max', 'avg', 'count', 'sum'}):
 

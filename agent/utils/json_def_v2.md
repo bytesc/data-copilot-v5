@@ -84,13 +84,11 @@ This document defines the JSON interface format for OpenSearch statistical analy
 | Median | `"median"` | Median (50th percentile) |
 | First Quartile | `"q1"` | First quartile (25th percentile) |
 | Third Quartile | `"q3"` | Third quartile (75th percentile) |
-| Fifth Percentile | `"q5"` | Fifth percentile |
 | Standard Deviation | `"std_deviation"` | Standard deviation |
 | Variance | `"variance"` | Variance |
-| Mode | `"mode"` | Most frequent value |
 
 ### 3.3 Default Metrics
-• If `metrics` is not specified, defaults to: `["min", "max", "avg", "count", "q1", "median", "q3"]`
+• If `metrics` is not specified, defaults to: `["min", "max", "avg", "count"]`
 
 ---
 
@@ -223,7 +221,6 @@ For time-based bucketing analysis
 | In | `"in"` | Field value is in specified list | Array | `"value": ["A", "B", "C"]` |
 | Range | `"range"` | Field is within specified range | Object | `"value": {"gte": 10, "lte": 20}` |
 | Exists | `"exists"` | Field exists (not null) | None | No value needed |
-| Missing | `"missing"` | Field is missing or null | None | No value needed |
 
 ---
 
@@ -263,7 +260,7 @@ For time-based bucketing analysis
     "type": "stats", 
     "config": {
       "fields": ["blood_pressure", "cholesterol", "heart_rate"],
-      "metrics": ["min", "max", "avg", "median", "q1", "q5", "q3", "std_deviation", "variance", "mode"],
+      "metrics": ["min", "max", "avg", "median", "q1", "q3", "std_deviation", "variance"],
       "filters": [
         {
           "field": "gender",
@@ -423,9 +420,7 @@ For time-based bucketing analysis
     "median": 45.0,
     "q3": 60.0,
     "std_deviation": 15.2,
-    "variance": 231.04,
-    "mode": 35,
-    "mode_count": 120
+    "variance": 231.04
   },
   "salary": {
     "count": 1000,
@@ -506,7 +501,6 @@ For time-based bucketing analysis
 2. Type compatibility: Operators must be compatible with field types
 3. Range validity: Range `from` must be less than `to` (if both specified)
 4. Array limits: Maximum 10 fields, 3 group levels recommended
-5. Pagination: Page must be ≥ 1, size must be ≤ 1000
 
 ---
 
@@ -536,5 +530,3 @@ For time-based bucketing analysis
 | Group levels | 2-3 | 5 |
 | Filters | 5-10 | 20 |
 | Buckets per aggregation | 100-1000 | 10000 |
-| Page size | 10-100 | 1000 |
-
