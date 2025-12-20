@@ -3,7 +3,7 @@ from typing import Dict, List, Any, Optional
 from collections import defaultdict
 
 
-class OpenSearchStatsTranslator:
+class OpenSearchJsonTranslator:
     """OpenSearch统计分析JSON翻译器"""
 
     # 支持的统计指标映射
@@ -89,37 +89,64 @@ class OpenSearchStatsTranslator:
             return None
 
     def _build_stats_query(self, config: Dict) -> Dict:
-        """构建统计计算查询"""
+        """构建统计计算查询 - 修复版本"""
         fields = config.get('fields', [])
-        metrics = config.get('metrics', ['min', 'max', 'avg', 'count', 'q1', 'median', 'q3'])
+        metrics = config.get('metrics', ['min', 'max', 'avg', 'count'])
 
         aggs = {}
+
+        # 为每个字段创建独立的聚合
         for field in fields:
-            field_aggs = {}
-            for metric in metrics:
-                if metric in ['median', 'q1', 'q3', 'q5']:
-                    if 'percentiles' not in field_aggs:
-                        field_aggs['percentiles'] = {
-                            'percentiles': {'field': field, 'percents': []}
+            field_metrics = []
+
+            # 检查是否需要特殊聚合类型
+            has_percentiles = any(metric in ['median', 'q1', 'q3', 'q5'] for metric in metrics)
+            has_extended_stats = any(metric in ['std_deviation', 'variance'] for metric in metrics)
+            has_mode = 'mode' in metrics
+
+            # 基本统计指标
+            basic_metrics = [metric for metric in metrics if metric in ['min', 'max', 'avg', 'sum', 'count']]
+
+            # 如果只需要基本统计，使用stats聚合（更高效）
+            if (set(metrics) == {'min', 'max', 'avg', 'count'} or
+                    set(metrics) == {'min', 'max', 'avg', 'count', 'sum'}):
+
+                aggs[f'{field}_stats'] = {'stats': {'field': field}}
+
+            else:
+                # 为每个指标创建单独的聚合
+                for metric in metrics:
+                    if metric == 'count':
+                        aggs[f'{field}_count'] = {'value_count': {'field': field}}
+                    elif metric == 'min':
+                        aggs[f'{field}_min'] = {'min': {'field': field}}
+                    elif metric == 'max':
+                        aggs[f'{field}_max'] = {'max': {'field': field}}
+                    elif metric == 'avg':
+                        aggs[f'{field}_avg'] = {'avg': {'field': field}}
+                    elif metric == 'sum':
+                        aggs[f'{field}_sum'] = {'sum': {'field': field}}
+                    elif metric in ['median', 'q1', 'q3', 'q5']:
+                        # 百分位数聚合
+                        percents = []
+                        if 'median' in metrics or 'q1' in metrics or 'q3' in metrics or 'q5' in metrics:
+                            if 'median' in metrics:
+                                percents.append(50.0)
+                            if 'q1' in metrics:
+                                percents.append(25.0)
+                            if 'q3' in metrics:
+                                percents.append(75.0)
+                            if 'q5' in metrics:
+                                percents.append(5.0)
+                        aggs[f'{field}_percentiles'] = {
+                            'percentiles': {'field': field, 'percents': percents}
                         }
-                    percent_value = 50 if metric == 'median' else 25 if metric == 'q1' else 75 if metric == 'q3' else 5
-                    if percent_value not in field_aggs['percentiles']['percentiles']['percents']:
-                        field_aggs['percentiles']['percentiles']['percents'].append(percent_value)
-
-                elif metric in ['std_deviation', 'variance']:
-                    if 'extended_stats' not in field_aggs:
-                        field_aggs['extended_stats'] = {'extended_stats': {'field': field}}
-
-                elif metric == 'mode':
-                    field_aggs['mode'] = {
-                        'terms': {'field': field, 'size': 1}
-                    }
-
-                else:
-                    es_metric = self.STATS_METRICS_MAP.get(metric, metric)
-                    field_aggs[metric] = {es_metric: {'field': field}}
-
-            aggs[field] = {'aggs': field_aggs}
+                    elif metric in ['std_deviation', 'variance']:
+                        # 扩展统计
+                        aggs[f'{field}_extended_stats'] = {'extended_stats': {'field': field}}
+                    elif metric == 'mode':
+                        # 众数（出现最多的值）
+                        aggs[f'{field}_mode'] = {'terms': {'field': field, 'size': 1}}
 
         return {
             'size': 0,
@@ -263,38 +290,57 @@ class OpenSearchStatsTranslator:
             return {'error': f'结果处理错误: {str(e)}'}
 
     def _process_stats_result(self, es_result: Dict, original_config: Dict) -> Dict:
-        """处理统计计算结果（内部方法）"""
+        """处理统计计算结果 - 修复版本"""
         result = {}
         config = original_config['query']['config']
         fields = config.get('fields', [])
-        metrics = config.get('metrics', ['min', 'max', 'avg', 'count', 'q1', 'median', 'q3'])
+        metrics = config.get('metrics', ['min', 'max', 'avg', 'count'])
 
         aggregations = es_result.get('aggregations', {})
 
         for field in fields:
             field_result = {}
-            field_aggs = aggregations.get(field, {})
 
-            for metric in metrics:
-                if metric == 'count':
-                    field_result['count'] = field_aggs.get('count', {}).get('value', 0)
-                elif metric in ['min', 'max', 'avg', 'sum']:
-                    field_result[metric] = field_aggs.get(metric, {}).get('value')
-                elif metric in ['std_deviation', 'variance']:
-                    ext_stats = field_aggs.get('extended_stats', {})
-                    if metric == 'std_deviation':
-                        field_result['std_deviation'] = ext_stats.get('std_deviation')
-                    else:
-                        field_result['variance'] = ext_stats.get('variance')
-                elif metric in ['median', 'q1', 'q3', 'q5']:
-                    percentiles = field_aggs.get('percentiles', {}).get('values', {})
-                    key = '50.0' if metric == 'median' else '25.0' if metric == 'q1' else '75.0' if metric == 'q3' else '5.0'
-                    field_result[metric] = percentiles.get(key)
-                elif metric == 'mode':
-                    buckets = field_aggs.get('mode', {}).get('buckets', [])
-                    if buckets:
-                        field_result['mode'] = buckets[0].get('key')
-                        field_result['mode_count'] = buckets[0].get('doc_count')
+            # 检查是否有stats聚合（基本统计）
+            stats_key = f'{field}_stats'
+            if stats_key in aggregations:
+                stats_data = aggregations[stats_key]
+                if 'min' in metrics:
+                    field_result['min'] = stats_data.get('min')
+                if 'max' in metrics:
+                    field_result['max'] = stats_data.get('max')
+                if 'avg' in metrics:
+                    field_result['avg'] = stats_data.get('avg')
+                if 'count' in metrics:
+                    field_result['count'] = stats_data.get('count')
+                if 'sum' in metrics:
+                    field_result['sum'] = stats_data.get('sum')
+            else:
+                # 处理单独的指标聚合
+                for metric in metrics:
+                    agg_key = f'{field}_{metric}'
+
+                    if metric == 'count' and agg_key in aggregations:
+                        field_result['count'] = aggregations[agg_key].get('value', 0)
+                    elif metric in ['min', 'max', 'avg', 'sum'] and agg_key in aggregations:
+                        field_result[metric] = aggregations[agg_key].get('value')
+                    elif metric in ['std_deviation', 'variance'] and f'{field}_extended_stats' in aggregations:
+                        ext_stats = aggregations[f'{field}_extended_stats']
+                        if metric == 'std_deviation':
+                            field_result['std_deviation'] = ext_stats.get('std_deviation')
+                        else:
+                            field_result['variance'] = ext_stats.get('variance')
+                    elif metric in ['median', 'q1', 'q3', 'q5'] and f'{field}_percentiles' in aggregations:
+                        percentiles = aggregations[f'{field}_percentiles'].get('values', {})
+                        key_map = {'median': '50.0', 'q1': '25.0', 'q3': '75.0', 'q5': '5.0'}
+                        key = key_map.get(metric)
+                        if key in percentiles:
+                            field_result[metric] = percentiles[key]
+                    elif metric == 'mode' and f'{field}_mode' in aggregations:
+                        buckets = aggregations[f'{field}_mode'].get('buckets', [])
+                        if buckets:
+                            field_result['mode'] = buckets[0].get('key')
+                            field_result['mode_count'] = buckets[0].get('doc_count')
 
             result[field] = field_result
 
@@ -390,7 +436,7 @@ def test_opensearch_stats_translator():
     """测试OpenSearch统计翻译器"""
 
     # 创建翻译器实例
-    translator = OpenSearchStatsTranslator()
+    translator = OpenSearchJsonTranslator()
 
     def test_basic_stats_query():
         """测试基础统计查询"""

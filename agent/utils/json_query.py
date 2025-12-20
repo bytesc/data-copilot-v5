@@ -2,585 +2,212 @@ import json
 from typing import Dict, Any
 import time
 
-from agent.utils.json_2_dsl import OpenSearchQueryTranslator
+from agent.utils.json_2_dsl import OpenSearchJsonTranslator
 from agent.utils.search_tools.opensearch_connection import search_by_dsl
 
 
-def test_descriptive_stats():
-    """测试描述性统计查询"""
-    print("\n" + "=" * 60)
-    print("测试1: 描述性统计")
+def run_opensearch_demo():
+    """运行OpenSearch查询演示（普通Python函数）"""
+
+    # 创建翻译器实例
+    translator = OpenSearchJsonTranslator()
+
+    print("🚀 开始OpenSearch查询演示")
     print("=" * 60)
 
-    query = {
-        "query": {
-            "type": "descriptive_stats",
-            "config": {
-                "fields": ["patient_age", "diabetes_time_y"],
-                "filters": [
-                    {
-                        "field": "diabetic_retinopathy",
-                        "operator": "eq",
-                        "value": 1
-                    },
-                    {
-                        "field": "patient_age",
-                        "operator": "gte",
-                        "value": 40
-                    }
-                ],
-                "metrics": ["count", "min", "max", "avg", "sum", "q1", "median", "q3"]
-            }
-        }
-    }
-
-    print("查询JSON:")
-    print(json.dumps(query, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
-
-    translator = OpenSearchQueryTranslator(index_name="brset")
-    dsl = translator.translate(query)
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    print("\n执行查询...")
-    result = search_by_dsl(dsl, index="brset", return_whole_response=True)
-
-    print("\n查询结果:")
-    print(f"查询耗时: {result.get('took', 0)}ms")
-    print(f"匹配文档数: {result.get('hits', {}).get('total', {}).get('value', 0)}")
-
-    formatted = translator.format_result("descriptive_stats", result)
-    print("\n格式化结果:")
-    print(json.dumps(formatted, indent=2, ensure_ascii=False))
-
-    return result
-
-
-def test_complete_stats():
-    """测试完整统计查询"""
-    print("\n" + "=" * 60)
-    print("测试2: 完整统计")
-    print("=" * 60)
-
-    query = {
-        "query": {
-            "type": "complete_stats",
-            "config": {
-                "fields": ["patient_age", "diabetes_time_y"],
-                "metrics": ["count", "min", "max", "avg", "sum", "q1", "q5", "median", "q3", "std_deviation",
-                            "variance", "mode", "cardinality"],
-                "filters": [
-                    {
-                        "field": "drusens",
-                        "operator": "eq",
-                        "value": 0
-                    },
-                    {
-                        "field": "patient_age",
-                        "operator": "gte",
-                        "value": 30
-                    }
-                ]
-            }
-        }
-    }
-
-    print("查询JSON:")
-    print(json.dumps(query, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
-
-    translator = OpenSearchQueryTranslator(index_name="brset")
-    dsl = translator.translate(query)
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    print("\n执行查询...")
-    result = search_by_dsl(dsl, index="brset", return_whole_response=True)
-
-    print("\n查询结果:")
-    print(f"查询耗时: {result.get('took', 0)}ms")
-
-    formatted = translator.format_result("complete_stats", result)
-    print("\n格式化结果:")
-    print(json.dumps(formatted, indent=2, ensure_ascii=False))
-
-    return result
-
-
-def test_frequency_analysis():
-    """测试频率分析"""
-    print("\n" + "=" * 60)
-    print("测试3: 频率分析")
-    print("=" * 60)
-
-    query = {
-        "query": {
-            "type": "frequency_analysis",
-            "config": {
-                "fields": ["drusens", "optic_disc", "camera.keyword"],
-                "group_by": ["diabetic_retinopathy", "patient_sex"],
-                "metrics": ["count", "percentage"],
-                "filters": [
-                    {
-                        "field": "quality",
-                        "operator": "eq",
-                        "value": "Adequate"
-                    },
-                    {
-                        "field": "patient_age",
-                        "operator": "gte",
-                        "value": 20
-                    }
-                ]
-            }
-        }
-    }
-
-    print("查询JSON:")
-    print(json.dumps(query, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
-
-    translator = OpenSearchQueryTranslator(index_name="brset")
-    dsl = translator.translate(query)
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    print("\n执行查询...")
-    result = search_by_dsl(dsl, index="brset", return_whole_response=True)
-
-    print("\n查询结果:")
-    print(f"查询耗时: {result.get('took', 0)}ms")
-
-    formatted = translator.format_result("frequency_analysis", result)
-    print("\n格式化结果:")
-    print(json.dumps(formatted, indent=2, ensure_ascii=False))
-
-    return result
-
-
-def test_cross_analysis():
-    """测试交叉分析"""
-    print("\n" + "=" * 60)
-    print("测试4: 交叉分析")
-    print("=" * 60)
-
-    query = {
-        "query": {
-            "type": "cross_analysis",
-            "config": {
-                "fields": ["hemorrhage", "macular_edema"],
-                "group_by": ["patient_sex"],
-                "bucket_ranges": [
-                    {
-                        "field": "patient_age",
-                        "ranges": [
-                            {"key": "young", "from": 0, "to": 20},
-                            {"key": "adult", "from": 20, "to": 40},
-                            {"key": "middle", "from": 40, "to": 60},
-                            {"key": "old", "from": 60}
-                        ],
-                        "type": "range"
-                    }
-                ],
-                "metrics": ["count", "percentage"],
-                "filters": [
-                    {
-                        "field": "diabetes",
-                        "operator": "eq",
-                        "value": "yes"
-                    },
-                    {
-                        "field": "diabetes_time_y",
-                        "operator": "gte",
-                        "value": 5
-                    }
-                ]
-            }
-        }
-    }
-
-    print("查询JSON:")
-    print(json.dumps(query, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
-
-    translator = OpenSearchQueryTranslator(index_name="brset")
-    dsl = translator.translate(query)
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    print("\n执行查询...")
-    result = search_by_dsl(dsl, index="brset", return_whole_response=True)
-
-    print("\n查询结果:")
-    print(f"查询耗时: {result.get('took', 0)}ms")
-
-    formatted = translator.format_result("cross_analysis", result)
-    print("\n格式化结果:")
-    print(json.dumps(formatted, indent=2, ensure_ascii=False))
-
-    return result
-
-
-def test_range_analysis():
-    """测试范围分析"""
-    print("\n" + "=" * 60)
-    print("测试5: 范围分析")
-    print("=" * 60)
-
-    query = {
-        "query": {
-            "type": "range_analysis",
-            "config": {
-                "field": "patient_age",
-                "ranges": [
-                    {"key": "0-20", "from": 0, "to": 20},
-                    {"key": "20-40", "from": 20, "to": 40},
-                    {"key": "40-60", "from": 40, "to": 60},
-                    {"key": "60+", "from": 60}
-                ],
-                "group_by": ["diabetic_retinopathy"],
-                "metrics_field": "diabetes_time_y",
-                "metrics": ["count", "avg"],
-                "filters": [
-                    {
-                        "field": "diabetes",
-                        "operator": "eq",
-                        "value": "yes"
-                    }
-                ]
-            }
-        }
-    }
-
-    print("查询JSON:")
-    print(json.dumps(query, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
-
-    translator = OpenSearchQueryTranslator(index_name="brset")
-    dsl = translator.translate(query)
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    print("\n执行查询...")
-    result = search_by_dsl(dsl, index="brset", return_whole_response=True)
-
-    print("\n查询结果:")
-    print(f"查询耗时: {result.get('took', 0)}ms")
-
-    formatted = translator.format_result("range_analysis", result)
-    print("\n格式化结果:")
-    print(json.dumps(formatted, indent=2, ensure_ascii=False))
-
-    return result
-
-
-def test_exists_and_regex():
-    """测试exists和正则表达式查询"""
-    print("\n" + "=" * 60)
-    print("测试6: exists和正则查询")
-    print("=" * 60)
-
-    # 测试exists
-    query1 = {
-        "query": {
-            "type": "descriptive_stats",
-            "config": {
-                "fields": ["patient_age"],
-                "filters": [
-                    {
-                        "field": "image_id",
-                        "operator": "exists"
-                    },
-                    {
-                        "field": "patient_id",
-                        "operator": "exists"
-                    }
-                ]
-            }
-        }
-    }
-
-    print("测试6.1: exists查询")
-    print(json.dumps(query1, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
-
-    translator = OpenSearchQueryTranslator(index_name="brset")
-    dsl1 = translator.translate(query1)
-    print(json.dumps(dsl1, indent=2, ensure_ascii=False))
-
-    print("\n执行查询...")
-    result1 = search_by_dsl(dsl1, index="brset", return_whole_response=True)
-    print(f"查询耗时: {result1.get('took', 0)}ms")
-
-    # 测试正则表达式
-    query2 = {
-        "query": {
-            "type": "frequency_analysis",
-            "config": {
-                "fields": ["camera.keyword"],
-                "filters": [
-                    {
-                        "field": "patient_id",
-                        "operator": "regexp",
-                        "value": ".*[0-9]$"
-                    }
-                ]
-            }
-        }
-    }
-
-    print("\n\n测试6.2: 正则表达式查询")
-    print(json.dumps(query2, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
-
-    dsl2 = translator.translate(query2)
-    print(json.dumps(dsl2, indent=2, ensure_ascii=False))
-
-    print("\n执行查询...")
-    result2 = search_by_dsl(dsl2, index="brset", return_whole_response=True)
-    print(f"查询耗时: {result2.get('took', 0)}ms")
-
-    return result1, result2
-
-
-def test_pagination():
-    """测试分页功能"""
-    print("\n" + "=" * 60)
-    print("测试7: 分页查询")
-    print("=" * 60)
-
-    query = {
-        "query": {
-            "type": "frequency_analysis",
-            "config": {
-                "fields": ["camera.keyword"],
-                "filters": [
-                    {
-                        "field": "patient_age",
-                        "operator": "gte",
-                        "value": 30
-                    }
-                ]
-            }
-        }
-    }
-
-    print("查询JSON:")
-    print(json.dumps(query, indent=2, ensure_ascii=False))
-
-    translator = OpenSearchQueryTranslator(index_name="brset")
-
-    for page in [1, 2]:
-        print(f"\n第{page}页 (每页5条):")
-        dsl = translator.translate_with_pagination(query, page=page, size=5)
-        print("生成的OpenSearch DSL (带分页):")
-        print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-        print(f"\n执行第{page}页查询...")
-        result = search_by_dsl(dsl, index="brset", return_whole_response=True)
-
-        hits = result.get("hits", {}).get("hits", [])
-        print(f"第{page}页结果数量: {len(hits)}")
-
-        if hits:
-            print("前5条结果:")
-            for i, hit in enumerate(hits[:5], 1):
-                source = hit.get("_source", {})
-                print(
-                    f"{i}. image_id: {source.get('image_id')}, age: {source.get('patient_age')}, camera: {source.get('camera')}")
-
-    return result
-
-
-def test_complex_filters():
-    """测试复杂过滤条件"""
-    print("\n" + "=" * 60)
-    print("测试8: 复杂过滤条件")
-    print("=" * 60)
-
-    query = {
-        "query": {
-            "type": "descriptive_stats",
-            "config": {
-                "fields": ["patient_age", "diabetes_time_y"],
-                "filters": [
-                    {
-                        "field": "nationality.keyword",
-                        "operator": "eq",
-                        "value": "Brazil"
-                    },
-                    {
-                        "field": "patient_age",
-                        "operator": "range",
-                        "value": {
-                            "gte": 20,
-                            "lte": 60
+    def demo_simple_stats():
+        """演示简单统计查询"""
+        print("\n📊 演示1: 患者年龄统计查询")
+        print("-" * 40)
+
+        # 构建统计查询：分析患者年龄的基本统计信息
+        input_json = {
+            "query": {
+                "type": "stats",
+                "config": {
+                    "fields": ["patient_age"],
+                    "metrics": ["min", "max", "avg", "count"],
+                    "filters": [
+                        {
+                            "field": "diabetes",
+                            "operator": "eq",
+                            "value": "Yes"
                         }
-                    },
-                    {
-                        "field": "diabetes_time_y",
-                        "operator": "gt",
-                        "value": 5
-                    },
-                    {
-                        "field": "patient_sex",
-                        "operator": "in",
-                        "value": [1, 2]
-                    },
-                    {
-                        "field": "camera.keyword",
-                        "operator": "wildcard",
-                        "value": "Canon*"
-                    }
-                ],
-                "metrics": ["count", "min", "max", "avg", "sum"]
+                    ]
+                }
             }
         }
-    }
 
-    print("查询JSON:")
-    print(json.dumps(query, indent=2, ensure_ascii=False))
-    print("\n生成的OpenSearch DSL:")
+        try:
+            # 翻译为 DSL
+            dsl = translator.translate(input_json)
+            print("生成的DSL:")
+            print(json.dumps(dsl, indent=2, ensure_ascii=False))
 
-    translator = OpenSearchQueryTranslator(index_name="brset")
-    dsl = translator.translate(query)
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
+            # 执行查询
+            print("\n执行查询中...")
+            result = search_by_dsl(dsl, index="brset", return_whole_response=True)
 
-    print("\n执行查询...")
-    result = search_by_dsl(dsl, index="brset", return_whole_response=True)
+            # 处理结果
+            processed = translator.process_result(result, input_json)
+            print("\n处理后的统计结果:")
+            print(json.dumps(processed, indent=2, ensure_ascii=False))
 
-    print("\n查询结果:")
-    print(f"查询耗时: {result.get('took', 0)}ms")
+            return True
+        except Exception as e:
+            print(f"❌ 查询失败: {e}")
+            return False
 
-    formatted = translator.format_result("descriptive_stats", result)
-    print("\n格式化结果:")
-    print(json.dumps(formatted, indent=2, ensure_ascii=False))
+    def demo_diabetic_retinopathy_distribution():
+        """演示糖尿病视网膜病变分布分析"""
+        print("\n👁️ 演示2: 糖尿病视网膜病变年龄分布")
+        print("-" * 40)
 
-    return result
+        input_json = {
+            "query": {
+                "type": "distribution",
+                "config": {
+                    "dimensions": ["diabetic_retinopathy"],
+                    "buckets": [
+                        {
+                            "type": "range",
+                            "field": "patient_age",
+                            "ranges": [
+                                {"key": "0-30岁", "from": 0, "to": 30},
+                                {"key": "30-50岁", "from": 30, "to": 50},
+                                {"key": "50-70岁", "from": 50, "to": 70},
+                                {"key": "70岁以上", "from": 70}
+                            ]
+                        }
+                    ],
+                    "metrics": ["count", "percentage"],
+                    "filters": [
+                        {
+                            "field": "diabetes",
+                            "operator": "eq",
+                            "value": "Yes"
+                        }
+                    ]
+                }
+            }
+        }
 
+        try:
+            # 翻译为 DSL
+            dsl = translator.translate(input_json)
+            print("生成的分布分析DSL:")
+            print(json.dumps(dsl, indent=2, ensure_ascii=False))
 
-def test_error_cases():
-    """测试错误情况"""
+            # 执行查询
+            print("\n执行查询中...")
+            result = search_by_dsl(dsl, index="brset", return_whole_response=True)
+
+            # 处理结果
+            processed = translator.process_result(result, input_json)
+            print("\n糖尿病视网膜病变分布结果:")
+            print(json.dumps(processed, indent=2, ensure_ascii=False))
+
+            return True
+        except Exception as e:
+            print(f"❌ 查询失败: {e}")
+            return False
+
+    def demo_quality_analysis():
+        """演示图像质量分析"""
+        print("\n📷 演示3: 图像质量分析")
+        print("-" * 40)
+
+        input_json = {
+            "query": {
+                "type": "distribution",
+                "config": {
+                    "dimensions": ["quality"],
+                    "groups": ["camera"],
+                    "metrics": ["count", "percentage"],
+                    "filters": [
+                        {
+                            "field": "Illuminaton",
+                            "operator": "eq",
+                            "value": 1  # 充足光照
+                        }
+                    ]
+                }
+            }
+        }
+
+        try:
+            dsl = translator.translate(input_json)
+            print("图像质量分析DSL:")
+            print(json.dumps(dsl, indent=2, ensure_ascii=False))
+
+            print("\n执行查询中...")
+            result = search_by_dsl(dsl, index="brset", return_whole_response=True)
+            processed = translator.process_result(result, input_json)
+            print("\n图像质量分析结果:")
+            print(json.dumps(processed, indent=2, ensure_ascii=False))
+
+            return True
+        except Exception as e:
+            print(f"❌ 查询失败: {e}")
+            return False
+
+    # 执行所有演示
+    demo_results = []
+
+    # 执行演示用例
+    demo_results.append(("患者年龄统计", demo_simple_stats()))
+    time.sleep(1)  # 避免请求过快
+
+    demo_results.append(("糖尿病视网膜病变分布", demo_diabetic_retinopathy_distribution()))
+    time.sleep(1)
+
+    demo_results.append(("图像质量分析", demo_quality_analysis()))
+
+    # 输出演示总结
     print("\n" + "=" * 60)
-    print("测试9: 错误情况处理")
+    print("演示总结:")
     print("=" * 60)
 
-    translator = OpenSearchQueryTranslator(index_name="brset")
+    successful_demos = 0
+    for demo_name, result in demo_results:
+        status = "✅ 成功" if result else "❌ 失败"
+        print(f"{demo_name}: {status}")
+        if result:
+            successful_demos += 1
 
-    # 测试1: 缺少必要字段
-    print("测试9.1: 缺少必要字段")
-    bad_query1 = {
-        "query": {
-            "type": "descriptive_stats",
-            "config": {
-                "filters": []
-            }
-        }
-    }
+    print(f"\n总计演示: {len(demo_results)} 个")
+    print(f"成功演示: {successful_demos} 个")
 
-    try:
-        dsl1 = translator.translate(bad_query1)
-        print("应该抛出异常，但没有抛出")
-    except ValueError as e:
-        print(f"预期异常: {e}")
-
-    # 测试2: 无效的查询类型
-    print("\n测试9.2: 无效的查询类型")
-    bad_query2 = {
-        "query": {
-            "type": "invalid_type",
-            "config": {
-                "fields": ["patient_age"]
-            }
-        }
-    }
-
-    try:
-        dsl2 = translator.translate(bad_query2)
-        print("应该抛出异常，但没有抛出")
-    except ValueError as e:
-        print(f"预期异常: {e}")
-
-    # 测试3: 无效的操作符
-    print("\n测试9.3: 无效的操作符")
-    bad_query3 = {
-        "query": {
-            "type": "descriptive_stats",
-            "config": {
-                "fields": ["patient_age"],
-                "filters": [
-                    {
-                        "field": "patient_age",
-                        "operator": "invalid_operator",
-                        "value": 30
-                    }
-                ]
-            }
-        }
-    }
-
-    try:
-        dsl3 = translator.translate(bad_query3)
-        result3 = search_by_dsl(dsl3, index="brset", return_whole_response=False)
-        print(f"查询结果: {result3}")
-    except Exception as e:
-        print(f"查询异常: {e}")
+    success_rate = (successful_demos / len(demo_results)) * 100 if demo_results else 0
+    print(f"成功率: {success_rate:.1f}%")
 
 
-def run_all_tests():
-    """运行所有测试"""
-    print("开始测试OpenSearch查询翻译器...")
-    print("=" * 60)
-
-    all_results = {}
-
-    try:
-        # 测试1: 描述性统计
-        all_results["descriptive_stats"] = test_descriptive_stats()
-
-        # 测试2: 完整统计
-        all_results["complete_stats"] = test_complete_stats()
-
-        # 测试3: 频率分析
-        all_results["frequency_analysis"] = test_frequency_analysis()
-
-        # 测试4: 交叉分析
-        all_results["cross_analysis"] = test_cross_analysis()
-
-        # 测试5: 范围分析
-        all_results["range_analysis"] = test_range_analysis()
-
-        # 测试6: exists和正则
-        all_results["exists_regex"] = test_exists_and_regex()
-
-        # 测试7: 分页
-        all_results["pagination"] = test_pagination()
-
-        # 测试8: 复杂过滤
-        all_results["complex_filters"] = test_complex_filters()
-
-        # 测试9: 错误情况
-        test_error_cases()
-
-        print("\n" + "=" * 60)
-        print("所有测试完成！")
-        print("=" * 60)
-
-        # 生成测试报告
-        print("\n测试报告:")
-        for test_name, result in all_results.items():
-            if isinstance(result, tuple):
-                print(f"{test_name}: 完成")
-            elif result:
-                took = result.get('took', 0) if isinstance(result, dict) else 0
-                print(f"{test_name}: 完成 (耗时: {took}ms)")
-            else:
-                print(f"{test_name}: 失败")
-
-    except Exception as e:
-        print(f"测试过程中发生异常: {e}")
-        import traceback
-        traceback.print_exc()
-
-    return all_results
+    return successful_demos == len(demo_results)
 
 
 if __name__ == "__main__":
-    # 运行所有测试
-    run_all_tests()
+    print("=" * 60)
+    print("OpenSearch JSON翻译器演示程序")
+    print("=" * 60)
+
+    print("\n" + "=" * 60)
+    print("开始运行演示...")
+    print("=" * 60)
+
+    # 第二步：运行演示
+    try:
+        success = run_opensearch_demo()
+
+        if success:
+            print("\n" + "🎊 所有演示完美完成！")
+        else:
+            print("\n" + "💡 演示完成，部分功能需要调整")
+
+    except KeyboardInterrupt:
+        print("\n\n⏹️ 演示被用户中断")
+    except Exception as e:
+        print(f"\n\n💥 演示过程中发生错误: {e}")
+
+    print("\n" + "=" * 60)
+    print("演示程序结束")
+    print("=" * 60)
