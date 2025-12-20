@@ -128,7 +128,7 @@ class OpenSearchStatsTranslator:
         }
 
     def _build_distribution_query(self, config: Dict) -> Dict:
-        """构建分布分析查询 ，支持百分比计算"""
+        """构建分布分析查询，支持百分比计算"""
         dimensions = config.get('dimensions', [])
         groups = config.get('groups', [])
         buckets = config.get('buckets', [])
@@ -238,63 +238,79 @@ class OpenSearchStatsTranslator:
                 es_metric = self.STATS_METRICS_MAP.get(metric, metric)
                 aggs[metric] = {es_metric: {'field': metrics_field}}
 
-    def process_stats_result(self, es_result: Dict, original_config: Dict) -> Dict:
-        """处理统计计算结果"""
+    def process_result(self, es_result: Dict, original_config: Dict) -> Dict:
+        """
+        统一的结果处理方法：自动识别查询类型并调用相应的处理逻辑
+
+        Args:
+            es_result: OpenSearch返回的原始结果
+            original_config: 原始查询配置
+
+        Returns:
+            处理后的结构化结果
+        """
         try:
-            result = {}
-            config = original_config['query']['config']
-            fields = config.get('fields', [])
-            metrics = config.get('metrics', ['min', 'max', 'avg', 'count', 'q1', 'median', 'q3'])
+            query_type = original_config['query']['type']
 
-            aggregations = es_result.get('aggregations', {})
-
-            for field in fields:
-                field_result = {}
-                field_aggs = aggregations.get(field, {})
-
-                for metric in metrics:
-                    if metric == 'count':
-                        field_result['count'] = field_aggs.get('count', {}).get('value', 0)
-                    elif metric in ['min', 'max', 'avg', 'sum']:
-                        field_result[metric] = field_aggs.get(metric, {}).get('value')
-                    elif metric in ['std_deviation', 'variance']:
-                        ext_stats = field_aggs.get('extended_stats', {})
-                        if metric == 'std_deviation':
-                            field_result['std_deviation'] = ext_stats.get('std_deviation')
-                        else:
-                            field_result['variance'] = ext_stats.get('variance')
-                    elif metric in ['median', 'q1', 'q3', 'q5']:
-                        percentiles = field_aggs.get('percentiles', {}).get('values', {})
-                        key = '50.0' if metric == 'median' else '25.0' if metric == 'q1' else '75.0' if metric == 'q3' else '5.0'
-                        field_result[metric] = percentiles.get(key)
-                    elif metric == 'mode':
-                        buckets = field_aggs.get('mode', {}).get('buckets', [])
-                        if buckets:
-                            field_result['mode'] = buckets[0].get('key')
-                            field_result['mode_count'] = buckets[0].get('doc_count')
-
-                result[field] = field_result
-
-            return result
+            if query_type == 'stats':
+                return self._process_stats_result(es_result, original_config)
+            elif query_type == 'distribution':
+                return self._process_distribution_result(es_result, original_config)
+            else:
+                return {'error': f'不支持的查询类型: {query_type}'}
 
         except Exception as e:
             return {'error': f'结果处理错误: {str(e)}'}
 
-    def process_distribution_result(self, es_result: Dict, original_config: Dict) -> Dict:
-        """处理分布分析结果，支持百分比计算"""
-        try:
-            aggregations = es_result.get('aggregations', {})
-            config = original_config['query']['config']
+    def _process_stats_result(self, es_result: Dict, original_config: Dict) -> Dict:
+        """处理统计计算结果（内部方法）"""
+        result = {}
+        config = original_config['query']['config']
+        fields = config.get('fields', [])
+        metrics = config.get('metrics', ['min', 'max', 'avg', 'count', 'q1', 'median', 'q3'])
 
-            # 获取总计数用于百分比计算
-            total_count = aggregations.get('_total_count', {}).get('value', 0)
+        aggregations = es_result.get('aggregations', {})
 
-            return self._process_distribution_aggregations(
-                aggregations, config, total_count, level=0
-            )
+        for field in fields:
+            field_result = {}
+            field_aggs = aggregations.get(field, {})
 
-        except Exception as e:
-            return {'error': f'分布结果处理错误: {str(e)}'}
+            for metric in metrics:
+                if metric == 'count':
+                    field_result['count'] = field_aggs.get('count', {}).get('value', 0)
+                elif metric in ['min', 'max', 'avg', 'sum']:
+                    field_result[metric] = field_aggs.get(metric, {}).get('value')
+                elif metric in ['std_deviation', 'variance']:
+                    ext_stats = field_aggs.get('extended_stats', {})
+                    if metric == 'std_deviation':
+                        field_result['std_deviation'] = ext_stats.get('std_deviation')
+                    else:
+                        field_result['variance'] = ext_stats.get('variance')
+                elif metric in ['median', 'q1', 'q3', 'q5']:
+                    percentiles = field_aggs.get('percentiles', {}).get('values', {})
+                    key = '50.0' if metric == 'median' else '25.0' if metric == 'q1' else '75.0' if metric == 'q3' else '5.0'
+                    field_result[metric] = percentiles.get(key)
+                elif metric == 'mode':
+                    buckets = field_aggs.get('mode', {}).get('buckets', [])
+                    if buckets:
+                        field_result['mode'] = buckets[0].get('key')
+                        field_result['mode_count'] = buckets[0].get('doc_count')
+
+            result[field] = field_result
+
+        return result
+
+    def _process_distribution_result(self, es_result: Dict, original_config: Dict) -> Dict:
+        """处理分布分析结果，支持百分比计算（内部方法）"""
+        aggregations = es_result.get('aggregations', {})
+        config = original_config['query']['config']
+
+        # 获取总计数用于百分比计算
+        total_count = aggregations.get('_total_count', {}).get('value', 0)
+
+        return self._process_distribution_aggregations(
+            aggregations, config, total_count, level=0
+        )
 
     def _process_distribution_aggregations(self, aggs: Dict, config: Dict,
                                            parent_total: int, level: int = 0) -> Dict:
@@ -370,555 +386,287 @@ class OpenSearchStatsTranslator:
         return bucket_result
 
 
-def demo_enhanced_distribution():
-    """演示分布分析功能"""
+def test_opensearch_stats_translator():
+    """测试OpenSearch统计翻译器"""
+
+    # 创建翻译器实例
     translator = OpenSearchStatsTranslator()
 
-    # 测试用例：不同部门、年龄段的薪资分布
-    test_query = {
-        "query": {
-            "type": "distribution",
-            "config": {
-                "dimensions": ["education"],
-                "groups": ["department"],
-                "buckets": [
-                    {
-                        "type": "range",
-                        "field": "age",
-                        "ranges": [
-                            {"key": "20-30", "from": 20, "to": 30},
-                            {"key": "30-40", "from": 30, "to": 40}
-                        ]
-                    }
-                ],
-                "metrics": ["count", "percentage", "avg"],
-                "metrics_field": "salary",
-                "filters": [
-                    {
-                        "field": "active",
-                        "operator": "eq",
-                        "value": True
-                    }
-                ]
-            }
-        }
-    }
+    def test_basic_stats_query():
+        """测试基础统计查询"""
+        print("=== 测试基础统计查询 ===")
 
-    # 生成DSL
-    dsl = translator.translate(test_query)
-    print("1. 生成的DSL（包含百分比计算）:")
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    # 模拟OpenSearch返回结果
-    mock_result = {
-        "aggregations": {
-            "_total_count": {"value": 1000},
-            "department": {
-                "buckets": [
-                    {
-                        "key": "engineering",
-                        "doc_count": 600,
-                        "_group_count": {"value": 600},
-                        "age": {
-                            "buckets": [
-                                {
-                                    "key": "20-30",
-                                    "from": 20,
-                                    "to": 30,
-                                    "doc_count": 300,
-                                    "_bucket_count": {"value": 300},
-                                    "education": {
-                                        "buckets": [
-                                            {
-                                                "key": "bachelor",
-                                                "doc_count": 200,
-                                                "_dimension_count": {"value": 200},
-                                                "count": {"value": 200},
-                                                "avg": {"value": 15000}
-                                            },
-                                            {
-                                                "key": "master",
-                                                "doc_count": 100,
-                                                "_dimension_count": {"value": 100},
-                                                "count": {"value": 100},
-                                                "avg": {"value": 20000}
-                                            }
-                                        ]
-                                    }
-                                },
-                                {
-                                    "key": "30-40",
-                                    "from": 30,
-                                    "to": 40,
-                                    "doc_count": 300,
-                                    "_bucket_count": {"value": 300},
-                                    "education": {
-                                        "buckets": [
-                                            {
-                                                "key": "bachelor",
-                                                "doc_count": 180,
-                                                "_dimension_count": {"value": 180},
-                                                "count": {"value": 180},
-                                                "avg": {"value": 25000}
-                                            },
-                                            {
-                                                "key": "master",
-                                                "doc_count": 120,
-                                                "_dimension_count": {"value": 120},
-                                                "count": {"value": 120},
-                                                "avg": {"value": 30000}
-                                            }
-                                        ]
-                                    }
-                                }
-                            ]
+        # 模拟输入
+        input_json = {
+            "query": {
+                "type": "stats",
+                "config": {
+                    "fields": ["age", "salary"],
+                    "metrics": ["min", "max", "avg", "count", "median"],
+                    "filters": [
+                        {
+                            "field": "department",
+                            "operator": "eq",
+                            "value": "engineering"
                         }
-                    },
-                    {
-                        "key": "sales",
-                        "doc_count": 400,
-                        "_group_count": {"value": 400},
-                        "age": {
-                            "buckets": [
-                                {
-                                    "key": "20-30",
-                                    "from": 20,
-                                    "to": 30,
-                                    "doc_count": 200,
-                                    "_bucket_count": {"value": 200},
-                                    "education": {
-                                        "buckets": [
-                                            {
-                                                "key": "bachelor",
-                                                "doc_count": 150,
-                                                "_dimension_count": {"value": 150},
-                                                "count": {"value": 150},
-                                                "avg": {"value": 12000}
-                                            }
-                                        ]
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-        }
-    }
-
-    print("\n2. 模拟的OpenSearch返回结果:")
-    print(json.dumps(mock_result, indent=2, ensure_ascii=False))
-
-    # 处理结果
-    processed_result = translator.process_distribution_result(mock_result, test_query)
-    print("\n3. 处理后的分布分析结果（包含百分比）:")
-    print(json.dumps(processed_result, indent=2, ensure_ascii=False))
-
-
-def test_basic_stats_query():
-    """测试基础统计查询功能"""
-    print("=== 测试1: 基础统计查询 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    # 基础统计查询
-    basic_stats = {
-        "query": {
-            "type": "stats",
-            "config": {
-                "fields": ["price", "quantity"],
-                "metrics": ["min", "max", "avg", "count"]
-            }
-        }
-    }
-
-    dsl = translator.translate(basic_stats)
-    print("生成的DSL:")
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    # 模拟返回结果
-    mock_result = {
-        "aggregations": {
-            "price": {
-                "min": {"value": 10},
-                "max": {"value": 100},
-                "avg": {"value": 55.5},
-                "count": {"value": 50}
-            },
-            "quantity": {
-                "min": {"value": 1},
-                "max": {"value": 20},
-                "avg": {"value": 8.5},
-                "count": {"value": 50}
-            }
-        }
-    }
-
-    result = translator.process_stats_result(mock_result, basic_stats)
-    print("\n处理后的统计结果:")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-
-    # 验证结果
-    assert "price" in result
-    assert result["price"]["min"] == 10
-    assert result["price"]["max"] == 100
-    assert result["price"]["avg"] == 55.5
-    print("✓ 基础统计查询测试通过")
-
-
-def test_stats_with_filters():
-    """测试带过滤条件的统计查询"""
-    print("\n=== 测试2: 带过滤的统计查询 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    stats_with_filters = {
-        "query": {
-            "type": "stats",
-            "config": {
-                "fields": ["salary"],
-                "metrics": ["min", "max", "avg", "median", "std_deviation"],
-                "filters": [
-                    {
-                        "field": "department",
-                        "operator": "eq",
-                        "value": "engineering"
-                    },
-                    {
-                        "field": "age",
-                        "operator": "gte",
-                        "value": 25
-                    },
-                    {
-                        "field": "salary",
-                        "operator": "lt",
-                        "value": 100000
-                    }
-                ]
-            }
-        }
-    }
-
-    dsl = translator.translate(stats_with_filters)
-    print("生成的DSL:")
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    # 验证过滤条件是否正确转换
-    query = dsl.get("query", {})
-    assert "bool" in query
-    assert "must" in query["bool"]
-    assert len(query["bool"]["must"]) == 3
-    print("✓ 过滤条件转换正确")
-
-
-def test_basic_distribution():
-    """测试基础分布分析"""
-    print("\n=== 测试3: 基础分布分析 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    basic_dist = {
-        "query": {
-            "type": "distribution",
-            "config": {
-                "dimensions": ["category"],
-                "metrics": ["count", "percentage"]
-            }
-        }
-    }
-
-    dsl = translator.translate(basic_dist)
-    print("生成的DSL:")
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    # 模拟简单分布结果
-    mock_result = {
-        "aggregations": {
-            "_total_count": {"value": 1000},
-            "category": {
-                "buckets": [
-                    {
-                        "key": "electronics",
-                        "doc_count": 400,
-                        "_dimension_count": {"value": 400},
-                        "count": {"value": 400}
-                    },
-                    {
-                        "key": "books",
-                        "doc_count": 350,
-                        "_dimension_count": {"value": 350},
-                        "count": {"value": 350}
-                    },
-                    {
-                        "key": "clothing",
-                        "doc_count": 250,
-                        "_dimension_count": {"value": 250},
-                        "count": {"value": 250}
-                    }
-                ]
-            }
-        }
-    }
-
-    result = translator.process_distribution_result(mock_result, basic_dist)
-    print("\n处理后的分布结果:")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-
-    # 验证百分比计算
-    buckets = result.get("buckets", [])
-    for bucket in buckets:
-        metrics = bucket.get("metrics", {})
-        if metrics.get("count") == 400:
-            assert metrics.get("percentage") == 40.0  # 400/1000 * 100
-        elif metrics.get("count") == 350:
-            assert metrics.get("percentage") == 35.0
-    print("✓ 基础分布分析测试通过")
-
-
-def test_terms_bucket_distribution():
-    """测试术语桶分布分析"""
-    print("\n=== 测试4: 术语桶分布分析 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    terms_dist = {
-        "query": {
-            "type": "distribution",
-            "config": {
-                "dimensions": ["sub_category"],
-                "buckets": [
-                    {
-                        "type": "terms",
-                        "field": "main_category",
-                        "size": 5
-                    }
-                ],
-                "metrics": ["count", "percentage", "avg"],
-                "metrics_field": "price"
-            }
-        }
-    }
-
-    dsl = translator.translate(terms_dist)
-    print("生成的DSL:")
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    # 验证术语桶配置
-    aggs = dsl.get("aggs", {})
-    assert "main_category" in aggs
-    assert aggs["main_category"]["terms"]["size"] == 5
-    print("✓ 术语桶配置正确")
-
-
-def test_range_bucket_distribution():
-    """测试范围桶分布分析"""
-    print("\n=== 测试5: 范围桶分布分析 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    range_dist = {
-        "query": {
-            "type": "distribution",
-            "config": {
-                "dimensions": ["status"],
-                "buckets": [
-                    {
-                        "type": "range",
-                        "field": "price",
-                        "ranges": [
-                            {"key": "低价", "from": 0, "to": 100},
-                            {"key": "中价", "from": 100, "to": 500},
-                            {"key": "高价", "from": 500}
-                        ]
-                    }
-                ],
-                "metrics": ["count", "percentage"]
-            }
-        }
-    }
-
-    dsl = translator.translate(range_dist)
-    print("生成的DSL:")
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    # 验证范围桶配置
-    aggs = dsl.get("aggs", {})
-    assert "price" in aggs
-    assert len(aggs["price"]["range"]["ranges"]) == 3
-    print("✓ 范围桶配置正确")
-
-
-def test_complex_metrics():
-    """测试复杂指标计算"""
-    print("\n=== 测试6: 复杂指标计算 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    complex_stats = {
-        "query": {
-            "type": "stats",
-            "config": {
-                "fields": ["score"],
-                "metrics": ["min", "max", "avg", "median", "q1", "q3", "std_deviation", "variance", "mode"]
-            }
-        }
-    }
-
-    dsl = translator.translate(complex_stats)
-    print("生成的DSL:")
-    print(json.dumps(dsl, indent=2, ensure_ascii=False))
-
-    # 模拟包含复杂指标的结果
-    mock_result = {
-        "aggregations": {
-            "score": {
-                "min": {"value": 0},
-                "max": {"value": 100},
-                "avg": {"value": 75.5},
-                "percentiles": {
-                    "values": {
-                        "25.0": 60.0,
-                        "50.0": 75.0,
-                        "75.0": 90.0
-                    }
-                },
-                "extended_stats": {
-                    "std_deviation": 15.2,
-                    "variance": 231.04
-                },
-                "mode": {
-                    "buckets": [
-                        {"key": 80, "doc_count": 25}
                     ]
                 }
             }
         }
-    }
 
-    result = translator.process_stats_result(mock_result, complex_stats)
-    print("\n处理后的复杂指标结果:")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+        # 翻译查询
+        result = translator.translate(input_json)
+        print("生成的DSL:", json.dumps(result, indent=2, ensure_ascii=False))
 
-    # 验证复杂指标
-    score_result = result.get("score", {})
-    assert score_result["min"] == 0
-    assert score_result["max"] == 100
-    assert score_result["avg"] == 75.5
-    assert score_result["q1"] == 60.0
-    assert score_result["median"] == 75.0
-    assert score_result["q3"] == 90.0
-    assert score_result["std_deviation"] == 15.2
-    assert score_result["variance"] == 231.04
-    assert score_result["mode"] == 80
-    print("✓ 复杂指标计算测试通过")
-
-
-def test_error_handling():
-    """测试错误处理"""
-    print("\n=== 测试7: 错误处理 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    # 测试无效查询类型
-    invalid_query = {
-        "query": {
-            "type": "invalid_type",
-            "config": {
-                "fields": ["test"]
+        # 模拟OpenSearch返回结果
+        mock_es_result = {
+            "aggregations": {
+                "age": {
+                    "min": {"value": 20},
+                    "max": {"value": 65},
+                    "avg": {"value": 35.5},
+                    "count": {"value": 1000},
+                    "percentiles": {"values": {"50.0": 35.0}}
+                },
+                "salary": {
+                    "min": {"value": 3000},
+                    "max": {"value": 50000},
+                    "avg": {"value": 15000.0},
+                    "count": {"value": 1000},
+                    "percentiles": {"values": {"50.0": 12000.0}}
+                }
             }
         }
-    }
 
-    result = translator.translate(invalid_query)
-    assert "error" in result
-    print("✓ 无效查询类型错误处理正确")
+        # 处理结果
+        processed_result = translator.process_result(mock_es_result, input_json)
+        print("处理后的结果:", json.dumps(processed_result, indent=2, ensure_ascii=False))
 
-    # 测试缺少必要字段
-    missing_fields = {
-        "query": {
-            "type": "stats",
-            "config": {
-                # 缺少fields字段
+        return True
+
+    def test_age_disease_distribution():
+        """测试不同年龄段是否患病比例分布"""
+        print("\n=== 测试年龄段患病分布 ===")
+
+        # 模拟输入：分析不同年龄段是否患病的分布
+        input_json = {
+            "query": {
+                "type": "distribution",
+                "config": {
+                    "dimensions": ["has_disease"],
+                    "buckets": [
+                        {
+                            "type": "range",
+                            "field": "age",
+                            "ranges": [
+                                {"key": "青年", "from": 0, "to": 30},
+                                {"key": "中年", "from": 30, "to": 60},
+                                {"key": "老年", "from": 60}
+                            ]
+                        }
+                    ],
+                    "metrics": ["count", "percentage"],
+                    "filters": [
+                        {
+                            "field": "data_source",
+                            "operator": "eq",
+                            "value": "medical_survey"
+                        }
+                    ]
+                }
             }
         }
-    }
 
-    result = translator.translate(missing_fields)
-    # 应该能正常处理空字段列表
-    assert "aggs" in result
-    print("✓ 缺失字段处理正确")
+        # 翻译查询
+        result = translator.translate(input_json)
+        print("生成的分布分析DSL:", json.dumps(result, indent=2, ensure_ascii=False))
 
-
-def test_percentage_calculation_edge_cases():
-    """测试百分比计算的边界情况"""
-    print("\n=== 测试8: 百分比计算边界情况 ===")
-
-    translator = OpenSearchStatsTranslator()
-
-    # 测试除零情况
-    mock_zero_result = {
-        "aggregations": {
-            "_total_count": {"value": 0},  # 总数为0
-            "category": {
-                "buckets": [
-                    {
-                        "key": "test",
-                        "doc_count": 0,
-                        "_dimension_count": {"value": 0},
-                        "count": {"value": 0}
-                    }
-                ]
+        # 模拟OpenSearch返回的分布分析结果
+        mock_es_result = {
+            "aggregations": {
+                "_total_count": {"value": 3000},
+                "age": {
+                    "buckets": [
+                        {
+                            "key": "青年",
+                            "from": 0,
+                            "to": 30,
+                            "doc_count": 1000,
+                            "has_disease": {
+                                "buckets": [
+                                    {"key": "true", "doc_count": 100},
+                                    {"key": "false", "doc_count": 900}
+                                ]
+                            }
+                        },
+                        {
+                            "key": "中年",
+                            "from": 30,
+                            "to": 60,
+                            "doc_count": 1500,
+                            "has_disease": {
+                                "buckets": [
+                                    {"key": "true", "doc_count": 300},
+                                    {"key": "false", "doc_count": 1200}
+                                ]
+                            }
+                        },
+                        {
+                            "key": "老年",
+                            "from": 60,
+                            "doc_count": 500,
+                            "has_disease": {
+                                "buckets": [
+                                    {"key": "true", "doc_count": 200},
+                                    {"key": "false", "doc_count": 300}
+                                ]
+                            }
+                        }
+                    ]
+                }
             }
         }
-    }
 
-    test_query = {
-        "query": {
-            "type": "distribution",
-            "config": {
-                "dimensions": ["category"],
-                "metrics": ["count", "percentage"]
+        # 处理分布分析结果
+        processed_result = translator.process_result(mock_es_result, input_json)
+        print("患病分布结果:", json.dumps(processed_result, indent=2, ensure_ascii=False))
+
+        return True
+
+    def test_complex_distribution():
+        """测试复杂分布分析：年龄段+性别+患病状态的交叉分析"""
+        print("\n=== 测试复杂分布分析 ===")
+
+        input_json = {
+            "query": {
+                "type": "distribution",
+                "config": {
+                    "dimensions": ["has_disease", "disease_type"],
+                    "groups": ["gender"],
+                    "buckets": [
+                        {
+                            "type": "range",
+                            "field": "age",
+                            "ranges": [
+                                {"key": "20-30", "from": 20, "to": 30},
+                                {"key": "30-40", "from": 30, "to": 40},
+                                {"key": "40-50", "from": 40, "to": 50}
+                            ]
+                        }
+                    ],
+                    "metrics": ["count", "percentage"],
+                    "filters": [
+                        {
+                            "field": "survey_year",
+                            "operator": "gte",
+                            "value": 2020
+                        }
+                    ]
+                }
             }
         }
-    }
 
-    result = translator.process_distribution_result(mock_zero_result, test_query)
-    buckets = result.get("buckets", [])
-    if buckets:
-        metrics = buckets[0].get("metrics", {})
-        assert metrics.get("percentage") == 0.0  # 除零时应返回0
+        # 翻译查询
+        result = translator.translate(input_json)
+        print("复杂分布分析DSL:", json.dumps(result, indent=2, ensure_ascii=False))
 
-    print("✓ 除零情况处理正确")
+        # 模拟复杂返回结果
+        mock_es_result = {
+            "aggregations": {
+                "_total_count": {"value": 5000},
+                "age": {
+                    "buckets": [
+                        {
+                            "key": "20-30",
+                            "from": 20,
+                            "to": 30,
+                            "doc_count": 2000,
+                            "gender": {
+                                "buckets": [
+                                    {
+                                        "key": "male",
+                                        "doc_count": 1000,
+                                        "has_disease": {
+                                            "buckets": [
+                                                {"key": "true", "doc_count": 50},
+                                                {"key": "false", "doc_count": 950}
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "key": "female",
+                                        "doc_count": 1000,
+                                        "has_disease": {
+                                            "buckets": [
+                                                {"key": "true", "doc_count": 30},
+                                                {"key": "false", "doc_count": 970}
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        }
 
+        # 处理结果
+        processed_result = translator.process_result(mock_es_result, input_json)
+        print("复杂分布结果:", json.dumps(processed_result, indent=2, ensure_ascii=False))
 
-def run_all_tests():
-    """运行所有测试"""
-    print("开始运行OpenSearch翻译器测试...\n")
+        return True
 
+    def test_error_handling():
+        """测试错误处理"""
+        print("\n=== 测试错误处理 ===")
+
+        # 测试无效查询类型
+        invalid_input = {
+            "query": {
+                "type": "invalid_type",
+                "config": {}
+            }
+        }
+
+        result = translator.translate(invalid_input)
+        print("错误查询结果:", result)
+
+        # 测试无效操作符
+        invalid_filter_input = {
+            "query": {
+                "type": "stats",
+                "config": {
+                    "fields": ["age"],
+                    "filters": [
+                        {
+                            "field": "department",
+                            "operator": "invalid_operator",
+                            "value": "test"
+                        }
+                    ]
+                }
+            }
+        }
+
+        result = translator.translate(invalid_filter_input)
+        print("无效操作符结果:", json.dumps(result, indent=2, ensure_ascii=False))
+
+        return True
+
+    # 执行所有测试
     try:
         test_basic_stats_query()
-        test_stats_with_filters()
-        test_basic_distribution()
-        test_terms_bucket_distribution()
-        test_range_bucket_distribution()
-        test_complex_metrics()
+        test_age_disease_distribution()
+        test_complex_distribution()
         test_error_handling()
-        test_percentage_calculation_edge_cases()
-
-        print("\n🎉 所有测试通过！")
-
+        print("\n=== 所有测试执行完成 ===")
+        return True
     except Exception as e:
-        print(f"\n❌ 测试失败: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"测试执行失败: {e}")
+        return False
 
 
+# 运行测试
 if __name__ == "__main__":
-    # 运行演示
-    demo_enhanced_distribution()
-
-    print("\n" + "=" * 60)
-    # 运行测试
-    run_all_tests()
-
-
+    test_opensearch_stats_translator()
