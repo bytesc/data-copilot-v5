@@ -85,7 +85,7 @@ def run_opensearch_demo():
                         {
                             "field": "diabetes",
                             "operator": "eq",
-                            "value": "Yes"
+                            "value": "yes"
                         }
                     ]
                 }
