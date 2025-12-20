@@ -40,3 +40,5 @@ curl -X GET "https://localhost:9200/brset/_mapping/field/patient_age?pretty" -u 
 curl -X GET "https://localhost:9200/brset/_field_stats?fields=patient_age,diabetic_retinopathy&pretty" -u admin:S202512sss -k
 搜索包含meta的字段
 curl -X GET "https://localhost:9200/brset/_search?pretty" -u admin:S202512sss -k -H "Content-Type: application/json" -d '{"query":{"exists":{"field":"_meta"}}}'
+
+curl -X PUT "https://localhost:9200/brset/_mapping" -u admin:S202512sss -k -H "Content-Type: application/json" -d "{\"properties\":{\"diabetes\":{\"type\":\"keyword\",\"meta\":{\"description\":\"Diabetes status. e.g., yes/no.\"}}}}"

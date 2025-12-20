@@ -360,7 +360,7 @@ class OpenSearchJsonTranslator:
 
     def _process_distribution_aggregations(self, aggs: Dict, config: Dict,
                                            parent_total: int, level: int = 0) -> Dict:
-        """递归处理分布分析聚合结果"""
+        """递归处理分布分析聚合结果 - 修复版本"""
         result = {'buckets': []}
 
         # 获取当前层级的聚合键
@@ -375,7 +375,8 @@ class OpenSearchJsonTranslator:
                 current_level_total = sum(bucket.get('doc_count', 0) for bucket in buckets)
 
                 for bucket in buckets:
-                    bucket_result = self._process_bucket(bucket, config, parent_total, current_level_total, level)
+                    # 处理当前桶
+                    bucket_result = self._create_bucket_result(bucket, config, parent_total, current_level_total)
 
                     # 递归处理子聚合
                     sub_aggs = {k: v for k, v in bucket.items()
@@ -392,21 +393,34 @@ class OpenSearchJsonTranslator:
 
         return result
 
-    def _process_bucket(self, bucket: Dict, config: Dict,
-                        parent_total: int, current_level_total: int, level: int) -> Dict:
-        """处理单个桶的结果"""
+    def _create_bucket_result(self, bucket: Dict, config: Dict,
+                              parent_total: int, current_level_total: int) -> Dict:
+        """创建桶结果 - 修复版本"""
         bucket_result = {
             'key': bucket.get('key'),
-            'key_as_string': bucket.get('key_as_string'),
-            'from': bucket.get('from'),
-            'to': bucket.get('to'),
             'doc_count': bucket.get('doc_count', 0)
         }
 
-        metrics = config.get('metrics', ['count', 'percentage'])
-        metrics_field = config.get('metrics_field')
+        # 只有 range 聚合才设置 from 和 to
+        if bucket.get('from') is not None or bucket.get('to') is not None:
+            bucket_result['from'] = bucket.get('from')
+            bucket_result['to'] = bucket.get('to')
+
+        # 只有需要格式化的聚合才设置 key_as_string
+        if 'key_as_string' in bucket:
+            bucket_result['key_as_string'] = bucket.get('key_as_string')
 
         # 计算指标
+        metrics_result = self._calculate_metrics(bucket, config, parent_total)
+        if metrics_result:
+            bucket_result['metrics'] = metrics_result
+
+        return bucket_result
+
+    def _calculate_metrics(self, bucket: Dict, config: Dict, parent_total: int) -> Dict:
+        """计算指标 - 修复版本"""
+        metrics = config.get('metrics', ['count', 'percentage'])
+        metrics_field = config.get('metrics_field')
         metrics_result = {}
 
         for metric in metrics:
@@ -414,7 +428,6 @@ class OpenSearchJsonTranslator:
                 metrics_result['count'] = bucket.get('doc_count', 0)
 
             elif metric == 'percentage':
-                # 计算百分比：当前桶计数 / 父级总计数 * 100
                 if parent_total > 0:
                     percentage = (bucket.get('doc_count', 0) / parent_total) * 100
                     metrics_result['percentage'] = round(percentage, 2)
@@ -426,10 +439,7 @@ class OpenSearchJsonTranslator:
                 if metric_value is not None:
                     metrics_result[metric] = metric_value
 
-        if metrics_result:
-            bucket_result['metrics'] = metrics_result
-
-        return bucket_result
+        return metrics_result
 
 
 def test_opensearch_stats_translator():

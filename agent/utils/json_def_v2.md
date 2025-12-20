@@ -43,14 +43,15 @@ This document defines the JSON interface format for OpenSearch statistical analy
 
 ### 2.1 Available Types
 
-| Type | Value | Description | Replaces Original Interfaces |
-|------|-------|-------------|-----------------------------|
-| Statistical Calculation | `"stats"` | Statistical analysis of numerical fields | descriptive_stats, complete_stats |
-| Distribution Analysis | `"distribution"` | Multidimensional distribution and grouping analysis | frequency_analysis, range_analysis, cross_analysis |
+| Type | Value | Description |
+|------|-------|-------------|
+| Statistical Calculation | `"stats"` | Statistical analysis of numerical fields |
+| Distribution Analysis | `"distribution"` | Multidimensional distribution and grouping analysis |
 
 ### 2.2 Type Selection Guide
-- **Pure numerical statistics** (averages, percentiles, standard deviation, etc.) → Use `stats`
-- **Distribution analysis** (grouped statistics, frequency distribution, range bucketing, etc.) → Use `distribution`
+• Pure numerical statistics (averages, percentiles, standard deviation, etc.) → Use `stats`
+
+• Distribution analysis (grouped statistics, frequency distribution, range bucketing, etc.) → Use `distribution`
 
 ---
 
@@ -87,10 +88,9 @@ This document defines the JSON interface format for OpenSearch statistical analy
 | Standard Deviation | `"std_deviation"` | Standard deviation |
 | Variance | `"variance"` | Variance |
 | Mode | `"mode"` | Most frequent value |
-| Cardinality | `"cardinality"` | Number of unique values |
 
 ### 3.3 Default Metrics
-- If `metrics` is not specified, defaults to: `["min", "max", "avg", "count", "q1", "median", "q3"]`
+• If `metrics` is not specified, defaults to: `["min", "max", "avg", "count", "q1", "median", "q3"]`
 
 ---
 
@@ -191,7 +191,7 @@ For time-based bucketing analysis
 | Maximum | `"max"` | Maximum value | Requires metrics_field |
 
 ### 4.4 Default Metrics
-- If `metrics` is not specified, defaults to: `["count", "percentage"]`
+• If `metrics` is not specified, defaults to: `["count", "percentage"]`
 
 ---
 
@@ -222,7 +222,6 @@ For time-based bucketing analysis
 | Less than or equal | `"lte"` | Field less than or equal to specified value | Number/Date | `"value": "2023-12-31"` |
 | In | `"in"` | Field value is in specified list | Array | `"value": ["A", "B", "C"]` |
 | Range | `"range"` | Field is within specified range | Object | `"value": {"gte": 10, "lte": 20}` |
-| Like | `"like"` | SQL LIKE pattern matching | String | `"value": "John%"` |
 | Exists | `"exists"` | Field exists (not null) | None | No value needed |
 | Missing | `"missing"` | Field is missing or null | None | No value needed |
 
@@ -503,32 +502,32 @@ For time-based bucketing analysis
 | Timeout | Query too complex or data too large | Add more filters, reduce fields |
 
 ### 8.2 Validation Rules
-1. **Field existence**: Fields must exist in the index mapping
-2. **Type compatibility**: Operators must be compatible with field types
-3. **Range validity**: Range `from` must be less than `to` (if both specified)
-4. **Array limits**: Maximum 10 fields, 3 group levels recommended
-5. **Pagination**: Page must be ≥ 1, size must be ≤ 1000
+1. Field existence: Fields must exist in the index mapping
+2. Type compatibility: Operators must be compatible with field types
+3. Range validity: Range `from` must be less than `to` (if both specified)
+4. Array limits: Maximum 10 fields, 3 group levels recommended
+5. Pagination: Page must be ≥ 1, size must be ≤ 1000
 
 ---
 
 ## 9. Performance Considerations
 
 ### 9.1 Optimization Guidelines
-1. **Indexing Strategy**:
-   - Ensure numerical fields are indexed as appropriate types
-   - Use keyword type for categorical fields used in grouping
-   - Create composite indices for frequently queried combinations
+1. Indexing Strategy:
+   • Ensure numerical fields are indexed as appropriate types
+   • Use keyword type for categorical fields used in grouping
+   • Create composite indices for frequently queried combinations
 
-2. **Query Design**:
-   - Always include relevant filters to reduce dataset size
-   - Use range queries instead of multiple OR conditions
-   - Limit the number of aggregation levels
-   - Set appropriate size limits for terms aggregations
+2. Query Design:
+   • Always include relevant filters to reduce dataset size
+   • Use range queries instead of multiple OR conditions
+   • Limit the number of aggregation levels
+   • Set appropriate size limits for terms aggregations
 
-3. **Resource Management**:
-   - Monitor aggregation memory usage
-   - Use pagination for large result sets
-   - Consider time-based partitioning for time-series data
+3. Resource Management:
+   • Monitor aggregation memory usage
+   • Use pagination for large result sets
+   • Consider time-based partitioning for time-series data
 
 ### 9.2 Recommended Limits
 | Parameter | Recommended Limit | Hard Limit |

@@ -31,7 +31,7 @@ def run_opensearch_demo():
                         {
                             "field": "diabetes",
                             "operator": "eq",
-                            "value": "Yes"
+                            "value": "yes"
                         }
                     ]
                 }
@@ -47,7 +47,7 @@ def run_opensearch_demo():
             # 执行查询
             print("\n执行查询中...")
             result = search_by_dsl(dsl, index="brset", return_whole_response=True)
-
+            print(result)
             # 处理结果
             processed = translator.process_result(result, input_json)
             print("\n处理后的统计结果:")
@@ -101,6 +101,7 @@ def run_opensearch_demo():
             # 执行查询
             print("\n执行查询中...")
             result = search_by_dsl(dsl, index="brset", return_whole_response=True)
+            print(result)
 
             # 处理结果
             processed = translator.process_result(result, input_json)
@@ -142,6 +143,7 @@ def run_opensearch_demo():
 
             print("\n执行查询中...")
             result = search_by_dsl(dsl, index="brset", return_whole_response=True)
+            print(result)
             processed = translator.process_result(result, input_json)
             print("\n图像质量分析结果:")
             print(json.dumps(processed, indent=2, ensure_ascii=False))

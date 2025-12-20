@@ -613,7 +613,7 @@ if __name__ == "__main__":
                 "insuline": {
                     "type": "keyword",
                     "meta": {
-                        "description": "Insulin usage. e.g., Yes/No."
+                        "description": "Insulin usage. e.g., yes/no."
                     }
                 },
                 "patient_sex": {
