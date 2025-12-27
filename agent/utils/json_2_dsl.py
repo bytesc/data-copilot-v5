@@ -1,6 +1,24 @@
 import json
 from typing import Dict, List, Any, Optional
-from collections import defaultdict
+
+
+
+"""
+统计查询（Stats Query）
+
+用户请求 → translate() → _build_stats_query()
+                
+OpenSearch返回结果 → process_result() → _process_stats_result()
+"""
+
+
+"""
+分布查询（Distribution Query）
+
+用户请求 → translate() → _build_distribution_query() → _build_distribution_aggregations() → _add_metrics_aggregations()
+                
+OpenSearch返回结果 → process_result() → _process_distribution_result() → _process_distribution_aggregations() → _create_bucket_result() → _calculate_metrics()
+"""
 
 
 class OpenSearchJsonTranslator:
@@ -89,7 +107,7 @@ class OpenSearchJsonTranslator:
             return None
 
     def _build_stats_query(self, config: Dict) -> Dict:
-        """构建统计计算查询 - 修复版本"""
+        """构建统计计算查询"""
         fields = config.get('fields', [])
         metrics = config.get('metrics', ['min', 'max', 'avg', 'count'])
 
@@ -257,13 +275,6 @@ class OpenSearchJsonTranslator:
     def process_result(self, es_result: Dict, original_config: Dict) -> Dict:
         """
         统一的结果处理方法：自动识别查询类型并调用相应的处理逻辑
-
-        Args:
-            es_result: OpenSearch返回的原始结果
-            original_config: 原始查询配置
-
-        Returns:
-            处理后的结构化结果
         """
         try:
             query_type = original_config['query']['type']
@@ -279,7 +290,7 @@ class OpenSearchJsonTranslator:
             return {'error': f'结果处理错误: {str(e)}'}
 
     def _process_stats_result(self, es_result: Dict, original_config: Dict) -> Dict:
-        """处理统计计算结果 - 修复版本"""
+        """处理统计计算结果"""
         result = {}
         config = original_config['query']['config']
         fields = config.get('fields', [])
@@ -336,7 +347,7 @@ class OpenSearchJsonTranslator:
         return result
 
     def _process_distribution_result(self, es_result: Dict, original_config: Dict) -> Dict:
-        """处理分布分析结果，支持百分比计算（内部方法）"""
+        """处理分布分析结果，支持百分比计算"""
         aggregations = es_result.get('aggregations', {})
         config = original_config['query']['config']
 
@@ -349,7 +360,7 @@ class OpenSearchJsonTranslator:
 
     def _process_distribution_aggregations(self, aggs: Dict, config: Dict,
                                            parent_total: int, level: int = 0) -> Dict:
-        """递归处理分布分析聚合结果 - 修复版本"""
+        """递归处理分布分析聚合结果"""
         result = {'buckets': []}
 
         # 获取当前层级的聚合键
@@ -384,7 +395,7 @@ class OpenSearchJsonTranslator:
 
     def _create_bucket_result(self, bucket: Dict, config: Dict,
                               parent_total: int, current_level_total: int) -> Dict:
-        """创建桶结果 - 修复版本"""
+        """创建桶结果"""
         bucket_result = {
             'key': bucket.get('key'),
             'doc_count': bucket.get('doc_count', 0)
@@ -407,7 +418,7 @@ class OpenSearchJsonTranslator:
         return bucket_result
 
     def _calculate_metrics(self, bucket: Dict, config: Dict, parent_total: int) -> Dict:
-        """计算指标 - 修复版本"""
+        """计算指标"""
         metrics = config.get('metrics', ['count', 'percentage'])
         metrics_field = config.get('metrics_field')
         metrics_result = {}

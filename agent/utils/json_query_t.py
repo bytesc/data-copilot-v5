@@ -7,8 +7,6 @@ from agent.utils.search_tools.opensearch_connection import search_by_dsl
 
 
 def run_opensearch_demo():
-    """运行OpenSearch查询演示（普通Python函数）"""
-
     # 创建翻译器实例
     translator = OpenSearchJsonTranslator()
 

@@ -1,3 +1,6 @@
+
+
+json_doc = """
 # OpenSearch Statistical Analysis JSON Interface Specification
 
 ## Overview
@@ -562,3 +565,6 @@ For time-based bucketing analysis
 | Group levels | 2-3 | 5 |
 | Filters | 5-10 | 20 |
 | Buckets per aggregation | 100-1000 | 10000 |
+
+
+"""

@@ -57,6 +57,24 @@ def search_by_dsl(dsl: Union[str, Dict[str, Any]],
     return err_info
 
 
+def get_index_mapping(index: str,
+                      raise_on_error: bool = True) -> Dict[str, Any]:
+    try:
+        # 使用OpenSearch客户端的indices.get_mapping方法
+        mapping = client.indices.get_mapping(index=index)
+        return mapping
+
+    except OpenSearchException as e:
+        err_info = {"error": f"获取索引 {index} 的mapping失败", "details": str(e)}
+        if raise_on_error:
+            raise RuntimeError(err_info)
+        return err_info
+    except Exception as e:
+        err_info = {"error": "未知异常", "details": str(e)}
+        if raise_on_error:
+            raise RuntimeError(err_info)
+        return err_info
+
 # ---------------- 使用示例 ----------------
 if __name__ == "__main__":
     # # 例1：直接写字典
@@ -112,3 +130,8 @@ if __name__ == "__main__":
 # }
 #             '''
     print(search_by_dsl(dsl_json, index="brset", return_whole_response=True))
+
+    mapping = get_index_mapping("brset")
+    print("brset索引的mapping信息：")
+    print(json.dumps(mapping, indent=2, ensure_ascii=False))
+
