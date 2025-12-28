@@ -194,7 +194,7 @@ class OpenSearchJsonTranslator:
         # 构建分组层级
         for group_field in groups:
             current_level[group_field] = {
-                'terms': {'field': group_field, 'size': 100},
+                'terms': {'field': group_field, 'size': 1000000},
                 'aggs': {
                     '_group_count': {'value_count': {'field': '_index'}}  # 分组级别计数
                 }
@@ -208,7 +208,7 @@ class OpenSearchJsonTranslator:
 
             if bucket_type == 'terms':
                 current_level[bucket_field] = {
-                    'terms': {'field': bucket_field, 'size': bucket.get('size', 10)},
+                    'terms': {'field': bucket_field, 'size': bucket.get('size', 1000000)},
                     'aggs': {
                         '_bucket_count': {'value_count': {'field': '_index'}}  # 桶级别计数
                     }
