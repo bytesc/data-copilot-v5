@@ -1,6 +1,6 @@
 from pywebio import start_server
 from pywebio.input import input, TEXT
-from pywebio.output import put_text, put_markdown, put_loading
+from pywebio.output import put_text, put_markdown, put_loading, put_image
 from agent.agent import query_agent
 
 
@@ -10,13 +10,15 @@ def main():
 
     while True:
         question = input("Query question:", type=TEXT, required=True)
-
+        put_markdown(f"**Query question:**")
+        put_markdown(question)
         if question.strip():
             with put_loading(shape="grow", color="primary"):
                 try:
-                    answer = query_agent(question,with_exp=True)
+                    answer, img_path = query_agent(question, with_exp=True, img=True)
                     put_markdown(f"**Query Result:**")
                     put_markdown(answer)
+                    put_image(open(img_path, 'rb').read())
                 except Exception as e:
                     put_text(f"Query error: {str(e)}")
 
@@ -26,5 +28,3 @@ def main():
 
 if __name__ == '__main__':
     start_server(main, port=8080, debug=True)
-    # 查询是否患有 diabetic_retinopathy比例 随年龄的分布
-

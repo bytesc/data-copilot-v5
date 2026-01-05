@@ -1,6 +1,7 @@
 import json
 
 from agent.utils.json_2_dsl import OpenSearchJsonTranslator
+from agent.utils.json_2_graph import visualize_opsearch_results
 from agent.utils.json_query_t import run_opensearch_demo
 from agent.utils.llm_access.LLM import get_llm
 from agent.utils.llm_access.call_llm import call_llm
@@ -16,7 +17,7 @@ llm = get_llm()
 
 
 
-def query_agent(question, tables=None,  retries=2, with_exp=False):
+def query_agent(question, tables=None,  retries=2, with_exp=False, img=True):
     pre_prompt = """
     You are a professional JSON query generation assistant. 
     Please generate the correct OpenSearch query JSON based on the user's question, 
@@ -59,11 +60,17 @@ def query_agent(question, tables=None,  retries=2, with_exp=False):
     print("\nans translated:")
     print(json.dumps(processed, indent=2, ensure_ascii=False))
 
-    if with_exp:
-        return "\n```json\n" +json.dumps(processed, indent=2, ensure_ascii=False) + "\n```\n" \
-               + get_data_explain(question, query_json, processed)
 
-    return processed
+
+    final_return = "\n```json\n" +json.dumps(processed, indent=2, ensure_ascii=False) + "\n```\n"
+
+    if with_exp:
+        final_return += get_data_explain(question, query_json, processed)+"\n"
+    if img:
+        path = visualize_opsearch_results(query_json, processed, "./graph")
+        print(path)
+        return final_return, path
+    return final_return
 
 
 def get_data_explain(question, query, result):
