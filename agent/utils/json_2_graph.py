@@ -81,18 +81,6 @@ def visualize_opsearch_results(
             return ""
 
         if query_type == "distribution":
-            def _has_nested_buckets(obj: Any) -> bool:
-                """递归判断是否存在 sub_aggregations.buckets"""
-                if isinstance(obj, dict):
-                    if "sub_aggregations" in obj and "buckets" in obj["sub_aggregations"]:
-                        return True
-                    return any(_has_nested_buckets(v) for v in obj.values())
-                if isinstance(obj, list):
-                    return any(_has_nested_buckets(item) for item in obj)
-                return False
-
-            if _has_nested_buckets(data_structure):
-                return "nested_side_by_side"
 
             if "buckets" in data_structure:
                 buckets = data_structure.get("buckets", [])
@@ -166,181 +154,172 @@ def visualize_opsearch_results(
 
     def _plot_distribution_bar(data: Dict, output_path: str) -> str:
         """Plot bar chart for distribution data."""
-        # Extract axis labels from query JSON
         axis_labels = _extract_axis_labels()
 
-        df = _flatten_distribution_data(data)
+        # ---------- 1. 判断要不要“分离子图” ----------
+        def _needs_separate_charts(obj: Any) -> bool:
+            """True -> 需要为每个外层 key 单独画一张子图"""
+            if not isinstance(obj, dict) or "buckets" not in obj:
+                return False
+            for b in obj["buckets"]:
+                # 必须同时满足：1.有内层  2.内层>1个  3.外层 key 有意义
+                inner = b.get("sub_aggregations", {}).get("buckets") or []
+                if len(inner) > 1 and b.get("key") is not None:
+                    return True
+            return False
 
-        if df.empty:
-            # Handle simple dictionary data
-            if isinstance(data, dict) and not any(isinstance(v, dict) for v in data.values()):
-                fig, ax = plt.subplots(figsize=(12, 8))
-                keys = list(data.keys())
-                values = list(data.values())
+        if _needs_separate_charts(data):
+            return _plot_separate_group_charts(data, output_path, axis_labels)
+        # ---------- 2. 单层逻辑（含无 sub、或 sub 只有 1 个） ----------
+        return _plot_single_layer_bar(data, output_path, axis_labels)
 
-                bars = ax.bar(range(len(keys)), values, color='steelblue', alpha=0.7)
-                ax.set_xlabel(axis_labels['x_label'])
-                ax.set_ylabel(axis_labels['y_label'])
-                ax.set_title('Distribution Analysis')
-                ax.set_xticks(range(len(keys)))
-                ax.set_xticklabels(keys, rotation=45, ha='right')
-                ax.grid(True, alpha=0.3)
-
-                # Add value labels
-                for bar in bars:
-                    height = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
-                            f'{height:.0f}', ha='center', va='bottom')
-            else:
-                # Try to extract from buckets
-                buckets = data.get('buckets', [])
-                if buckets:
-                    # Check if there are percentage metrics
-                    has_percentage = any('percentage' in str(key).lower()
-                                         for b in buckets
-                                         for key in b.get('metrics', {}).keys())
-
-                    if has_percentage:
-                        # Create figure with two subplots - left bar, right pie
-                        fig, axes = plt.subplots(1, 2, figsize=(16, 8))
-
-                        # Left plot: Bar chart for counts
-                        ax1 = axes[0]
-                        labels = [str(b.get('key', f'Bucket {i}')) for i, b in enumerate(buckets)]
-                        counts = [b.get('doc_count', b.get('metrics', {}).get('count', 0))
-                                  for b in buckets]
-
-                        bars = ax1.bar(labels, counts, color='steelblue', alpha=0.7)
-                        ax1.set_xlabel(axis_labels['x_label'])
-                        ax1.set_ylabel('Count')
-                        ax1.set_title('Count Distribution')
-                        ax1.tick_params(axis='x', rotation=45)
-                        ax1.grid(True, alpha=0.3)
-
-                        # Add value labels
-                        for bar in bars:
-                            height = bar.get_height()
-                            ax1.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
-                                     f'{height:.0f}', ha='center', va='bottom')
-
-                        # Right plot: Pie chart for percentages
-                        ax2 = axes[1]
-                        percentages = [b.get('metrics', {}).get('percentage', 0)
-                                       for b in buckets]
-
-                        # Only plot pie if we have percentages
-                        if any(p > 0 for p in percentages):
-                            wedges, texts, autotexts = ax2.pie(
-                                percentages,
-                                labels=labels,
-                                autopct='%1.1f%%',
-                                startangle=90,
-                                colors=['lightcoral', 'lightgreen', 'lightblue']
-                            )
-                            ax2.set_title('Percentage Distribution')
-                        else:
-                            ax2.axis('off')
-                    else:
-                        # Original bar chart code
-                        fig, ax = plt.subplots(figsize=(12, 8))
-                        labels = [str(b.get('key', f'Bucket {i}')) for i, b in enumerate(buckets)]
-                        counts = [b.get('doc_count', b.get('metrics', {}).get('count', 0))
-                                  for b in buckets]
-
-                        bars = ax.bar(labels, counts, color='steelblue', alpha=0.7)
-                        ax.set_xlabel(axis_labels['x_label'])
-                        ax.set_ylabel(axis_labels['y_label'])
-                        ax.set_title('Distribution by Bucket')
-                        ax.tick_params(axis='x', rotation=45)
-                        ax.grid(True, alpha=0.3)
-
-                        # Add value labels
-                        for bar in bars:
-                            height = bar.get_height()
-                            ax.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
-                                    f'{height:.0f}', ha='center', va='bottom')
+    def _plot_single_layer_bar(data: Dict, output_path: str, axis_labels: Dict[str, str]) -> str:
+        """真正的单层（或忽略 sub）bar + pie 画法"""
+        buckets = data.get("buckets", [])
+        if not buckets and isinstance(data, dict) and data:
+            # 纯 dict 场景：{"Diabetes":25.5,"Hypertension":42.3,...}
+            keys, values = list(data.keys()), list(data.values())
+            has_pct = sum(values) > 0.95  # 简单 heuristic：总和接近 100 认为是百分比
         else:
-            # Plot from flattened DataFrame
-            fig, axes = plt.subplots(1, 2, figsize=(16, 8))
+            keys = [str(b.get("key", f"Bucket{i}")) for i, b in enumerate(buckets)]
+            values = [b.get("doc_count", b.get("metrics", {}).get("count", 0))
+                      for b in buckets]
+            has_pct = any("percentage" in str(b.get("metrics", {})).lower()
+                          for b in buckets)
 
-            # Check if we have percentage data
-            has_percentage = any('percentage' in col.lower() for col in df.columns)
+        # 画布
+        fig, axes = plt.subplots(1, 2, figsize=(16, 8)) if has_pct else \
+            (plt.subplots(figsize=(12, 8)))
+        ax1 = axes[0] if has_pct else axes
 
-            # Plot 1: Main distribution (always bar chart)
-            if 'bucket_key' in df.columns:
-                ax1 = axes[0]
-                if 'doc_count' in df.columns:
-                    df_grouped = df.groupby('bucket_key')['doc_count'].sum().reset_index()
-                    bars = ax1.bar(df_grouped['bucket_key'], df_grouped['doc_count'],
-                                   color='steelblue', alpha=0.7)
-                    ax1.set_ylabel('Count')
-                elif 'metrics_count' in df.columns:
-                    df_grouped = df.groupby('bucket_key')['metrics_count'].sum().reset_index()
-                    bars = ax1.bar(df_grouped['bucket_key'], df_grouped['metrics_count'],
-                                   color='steelblue', alpha=0.7)
-                    ax1.set_ylabel('Count')
+        # Bar
+        bars = ax1.bar(keys, values, color='steelblue', alpha=0.7)
+        ax1.set_xlabel(axis_labels['x_label'])
+        ax1.set_ylabel(axis_labels['y_label'])
+        ax1.set_title("Count Distribution")
+        ax1.tick_params(axis='x', rotation=45)
+        ax1.grid(axis='y', alpha=0.3)
+        for bar in bars:
+            h = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width() / 2, h + max(values) * 0.01,
+                     f'{int(h)}', ha='center', va='bottom')
 
-                ax1.set_xlabel(axis_labels['x_label'])
-                ax1.set_title('Count Distribution')
-                ax1.tick_params(axis='x', rotation=45)
-                ax1.grid(True, alpha=0.3)
-
-                # Add value labels
-                for bar in bars:
-                    height = bar.get_height()
-                    ax1.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
-                             f'{height:.0f}', ha='center', va='bottom')
-
-            # Plot 2: Percentage or other data
-            ax2 = axes[1]
-            if has_percentage:
-                # Find first percentage column
-                perc_col = next(col for col in df.columns if 'percentage' in col.lower())
-
-                if 'bucket_key' in df.columns:
-                    # Group by bucket_key and take first percentage value (assuming same for all rows in group)
-                    perc_data = df.groupby('bucket_key')[perc_col].first().reset_index()
-
-                    if len(perc_data) > 1:  # Need at least 2 values for pie chart
-                        wedges, texts, autotexts = ax2.pie(
-                            perc_data[perc_col],
-                            labels=perc_data['bucket_key'],
-                            autopct='%1.1f%%',
-                            startangle=90,
-                            colors=['lightcoral', 'lightgreen', 'lightblue']
-                        )
-                        ax2.set_title('Percentage Distribution')
-                    else:
-                        ax2.axis('off')
-                else:
-                    ax2.axis('off')
-            else:
-                # Original code for non-percentage data
-                dim_cols = [col for col in df.columns if
-                            col.startswith('dim_') and not col.endswith('_count') and not col.endswith('_percentage')]
-
-                if dim_cols:
-                    for dim_col in dim_cols[:3]:  # Limit to 3 dimensions
-                        count_col = f"{dim_col}_count"
-                        if count_col in df.columns:
-                            dim_data = df.groupby(dim_col)[count_col].sum().reset_index()
-                            if len(dim_data) > 0:
-                                ax2.bar(dim_data[dim_col], dim_data[count_col],
-                                        alpha=0.6, label=dim_col.replace('dim_', ''))
-
-                    ax2.set_xlabel('Dimension Values')
-                    ax2.set_ylabel(axis_labels['y_label'])
-                    ax2.set_title('Distribution by Dimension')
-                    ax2.legend()
-                    ax2.tick_params(axis='x', rotation=45)
-                    ax2.grid(True, alpha=0.3)
-                else:
-                    ax2.axis('off')
+        # Pie
+        if has_pct:
+            pct_vals = [b.get("metrics", {}).get("percentage", 0) for b in buckets] or values
+            axes[1].pie(pct_vals, labels=keys, autopct='%1.1f%%', startangle=90)
+            axes[1].set_title("Percentage Distribution")
 
         plt.suptitle("Distribution Analysis", fontsize=16, fontweight='bold')
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
         plt.close()
+        return output_path
+
+    def _plot_separate_group_charts(data: Dict, output_path: str, axis_labels: Dict[str, str]) -> str:
+        """Create separate charts for each outer group in nested data"""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from pathlib import Path
+
+        buckets = data.get('buckets', [])
+        if not buckets:
+            return _plot_distribution_bar(data, output_path)
+
+        # Determine how many outer groups we have
+        n_groups = len(buckets)
+
+        # Create subplots for each group
+        fig, axes = plt.subplots(1, n_groups, figsize=(6 * n_groups, 6), squeeze=False)
+        axes = axes.flatten()
+
+        # Extract inner field name from query config for consistent labeling
+        config = query_json.get("query", {}).get("config", {})
+        inner_field = None
+
+        if "groups" in config and config["groups"]:
+            inner_field = config["groups"][0]
+        elif "dimensions" in config and len(config["dimensions"]) > 1:
+            inner_field = config["dimensions"][1]
+
+        if inner_field:
+            inner_name = inner_field.replace("_", " ").title()
+        else:
+            inner_name = "Subcategory"
+
+        # Process each outer group
+        for idx, outer_bucket in enumerate(buckets):
+            ax = axes[idx]
+            outer_key = str(outer_bucket.get('key', f'Group {idx}'))
+            outer_count = outer_bucket.get('doc_count', 0)
+
+            # Extract inner buckets
+            inner_buckets = []
+            if 'sub_aggregations' in outer_bucket and 'buckets' in outer_bucket['sub_aggregations']:
+                inner_buckets = outer_bucket['sub_aggregations']['buckets']
+            elif 'groups' in outer_bucket:
+                # Alternative structure
+                for group_key, group_data in outer_bucket['groups'].items():
+                    if 'buckets' in group_data:
+                        inner_buckets.extend(group_data['buckets'])
+
+            if not inner_buckets:
+                # No inner data, show summary for this group
+                ax.text(0.5, 0.5, f'Total: {outer_count}',
+                        ha='center', va='center', fontsize=12,
+                        transform=ax.transAxes)
+                ax.set_title(f'{inner_name}: {outer_key}\n(Total: {outer_count})')
+                ax.axis('off')
+                continue
+
+            # Prepare data for inner groups
+            inner_labels = []
+            inner_counts = []
+            inner_percentages = []
+
+            for inner_bucket in inner_buckets:
+                inner_key = str(inner_bucket.get('key', ''))
+                inner_count = inner_bucket.get('doc_count', 0)
+
+                inner_labels.append(inner_key)
+                inner_counts.append(inner_count)
+
+                # Calculate percentage within this outer group
+                if outer_count > 0:
+                    percentage = (inner_count / outer_count) * 100
+                else:
+                    percentage = 0
+                inner_percentages.append(percentage)
+
+            # Create bar chart for this outer group
+            x_pos = np.arange(len(inner_labels))
+            bars = ax.bar(x_pos, inner_counts, color='steelblue', alpha=0.7)
+
+            # Customize the subplot
+            ax.set_xlabel(axis_labels['x_label'])
+            ax.set_ylabel(axis_labels['y_label'])
+            ax.set_title(f'{inner_name}: {outer_key}\n(Total: {outer_count})')
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels(inner_labels, rotation=45, ha='right')
+            ax.grid(True, alpha=0.3, axis='y')
+
+            # Add value labels on bars
+            for i, bar in enumerate(bars):
+                height = bar.get_height()
+                # Show both count and percentage
+                ax.text(bar.get_x() + bar.get_width() / 2., height + max(inner_counts) * 0.01,
+                        f'{int(height)}\n({inner_percentages[i]:.1f}%)',
+                        ha='center', va='bottom', fontsize=9)
+
+        # Set overall title
+        outer_field = config.get("dimensions", [""])[0] if config.get("dimensions") else "Group"
+        outer_name = outer_field.replace("_", " ").title()
+        fig.suptitle(f'{inner_name} Distribution by {outer_name}', fontsize=16, fontweight='bold')
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+
         return output_path
 
     def _plot_grouped_distribution(data: Dict, output_path: str) -> str:
@@ -502,94 +481,6 @@ def visualize_opsearch_results(
         plt.close()
         return output_path
 
-    def _plot_side_by_side(data: Dict, output_path: str) -> str:
-        """
-        嵌套两层 buckets 的并排柱图：
-        第一层（depth=1）当横轴，第二层（depth=2）当并排柱。
-        横纵坐标标签、图例标题均从 query_json 解析。
-        """
-        import matplotlib.pyplot as plt
-        import numpy as np
-        from collections import defaultdict
-
-        # ---------- 1. 基础标签 ----------
-        axis_labels = _extract_axis_labels()
-
-        # ---------- 2. 从 query_json 解析真正的字段名 ----------
-        config = query_json.get("query", {}).get("config", {})
-        dims = config.get("dimensions", [])
-        groups = config.get("groups", [])
-
-        outer_field = dims[0] if len(dims) > 0 else "group"
-        inner_field = dims[1] if len(dims) > 1 else groups[0] if groups else "subgroup"
-
-        outer_name = outer_field.replace("_", " ").title()
-        inner_name = inner_field.replace("_", " ").title()
-
-        # ---------- 3. 只扫两层 buckets ----------
-        depth_buckets: Dict[int, List[Dict]] = defaultdict(list)
-
-        def _scan_levels(node: Any, depth: int):
-            if isinstance(node, dict) and "sub_aggregations" in node:
-                buckets = node["sub_aggregations"].get("buckets", [])
-                if buckets:
-                    depth_buckets[depth].extend(buckets)
-                    for b in buckets:
-                        _scan_levels(b, depth + 1)
-
-        for b in data.get("buckets", []):
-            _scan_levels(b, 1)
-
-        # 如果没有第二层，直接回退
-        if 2 not in depth_buckets:
-            return _plot_distribution_bar(data, output_path)
-
-        # ---------- 4. 构造「外层 key -> 内层计数」 ----------
-        outer_order = [b["key"] for b in data.get("buckets", [])]  # 横轴顺序
-        outer_inner_cnt: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-
-        for ob in data.get("buckets", []):
-            ok = ob.get("key")
-            if "sub_aggregations" in ob:
-                for ib in ob["sub_aggregations"].get("buckets", []):
-                    ik = str(ib.get("key"))
-                    outer_inner_cnt[ok][ik] += ib.get("doc_count", 0)
-
-        inner_values = sorted({ik for v in outer_inner_cnt.values() for ik in v})
-        n_outer = len(outer_order)
-        n_inner = len(inner_values)
-        counts = np.zeros((n_outer, n_inner))
-
-        for o_idx, ok in enumerate(outer_order):
-            for i_idx, ik in enumerate(inner_values):
-                counts[o_idx, i_idx] = outer_inner_cnt[ok][ik]
-
-        # ---------- 5. 画图 ----------
-        fig, ax = plt.subplots(figsize=(6, 5))
-        x = np.arange(n_outer)
-        width = 0.8 / n_inner
-        colors = plt.cm.tab10(np.linspace(0, 1, n_inner))
-
-        for i_idx in range(n_inner):
-            ax.bar(x + width * (i_idx - (n_inner - 1) / 2),
-                   counts[:, i_idx],
-                   width,
-                   color=colors[i_idx],
-                   label=f'{inner_values[i_idx]}')
-
-        ax.set_xlabel(outer_name)
-        ax.set_ylabel(axis_labels['y_label'])
-        ax.set_title(f'{inner_name} distribution by {outer_name}')
-        ax.set_xticks(x)
-        ax.set_xticklabels(outer_order, rotation=45, ha='right')
-        ax.legend(title=inner_name)
-        ax.grid(axis='y', alpha=0.3)
-
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        return output_path
-
     def _plot_pie_chart(data: Dict, output_path: str) -> str:
         """Plot pie chart for percentage data."""
         fig, axes = plt.subplots(1, 2, figsize=(16, 8))
@@ -660,9 +551,6 @@ def visualize_opsearch_results(
 
         elif chart_type == "pie":
             return _plot_pie_chart(result_json, output_path)
-
-        elif chart_type == "nested_side_by_side":
-            return _plot_side_by_side(result_json, output_path)
 
         else:  # Default to bar chart
             return _plot_distribution_bar(result_json, output_path)
