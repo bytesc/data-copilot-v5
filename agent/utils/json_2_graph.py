@@ -39,14 +39,6 @@ def visualize_opsearch_results(
         """Extract query type from query JSON."""
         return query_json.get("query", {}).get("type", "").lower()
 
-    def _extract_fields_from_query() -> List[str]:
-        """Extract relevant fields from query configuration."""
-        config = query_json.get("query", {}).get("config", {})
-        fields = config.get("fields", [])
-        dimensions = config.get("dimensions", [])
-        groups = config.get("groups", [])
-        return list(set(fields + dimensions + groups))
-
     def _extract_axis_labels() -> Dict[str, str]:
         """Extract axis labels from query JSON."""
         config = query_json.get("query", {}).get("config", {})
@@ -312,43 +304,93 @@ def visualize_opsearch_results(
                 # Try to extract from buckets
                 buckets = data.get('buckets', [])
                 if buckets:
-                    fig, ax = plt.subplots(figsize=(12, 8))
-                    labels = [str(b.get('key', f'Bucket {i}')) for i, b in enumerate(buckets)]
-                    counts = [b.get('doc_count', b.get('metrics', {}).get('count', 0))
-                              for b in buckets]
+                    # Check if there are percentage metrics
+                    has_percentage = any('percentage' in str(key).lower()
+                                         for b in buckets
+                                         for key in b.get('metrics', {}).keys())
 
-                    bars = ax.bar(labels, counts, color='steelblue', alpha=0.7)
-                    ax.set_xlabel(axis_labels['x_label'])
-                    ax.set_ylabel(axis_labels['y_label'])
-                    ax.set_title('Distribution by Bucket')
-                    ax.tick_params(axis='x', rotation=45)
-                    ax.grid(True, alpha=0.3)
+                    if has_percentage:
+                        # Create figure with two subplots - left bar, right pie
+                        fig, axes = plt.subplots(1, 2, figsize=(16, 8))
 
-                    # Add value labels
-                    for bar in bars:
-                        height = bar.get_height()
-                        ax.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
-                                f'{height:.0f}', ha='center', va='bottom')
+                        # Left plot: Bar chart for counts
+                        ax1 = axes[0]
+                        labels = [str(b.get('key', f'Bucket {i}')) for i, b in enumerate(buckets)]
+                        counts = [b.get('doc_count', b.get('metrics', {}).get('count', 0))
+                                  for b in buckets]
+
+                        bars = ax1.bar(labels, counts, color='steelblue', alpha=0.7)
+                        ax1.set_xlabel(axis_labels['x_label'])
+                        ax1.set_ylabel('Count')
+                        ax1.set_title('Count Distribution')
+                        ax1.tick_params(axis='x', rotation=45)
+                        ax1.grid(True, alpha=0.3)
+
+                        # Add value labels
+                        for bar in bars:
+                            height = bar.get_height()
+                            ax1.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
+                                     f'{height:.0f}', ha='center', va='bottom')
+
+                        # Right plot: Pie chart for percentages
+                        ax2 = axes[1]
+                        percentages = [b.get('metrics', {}).get('percentage', 0)
+                                       for b in buckets]
+
+                        # Only plot pie if we have percentages
+                        if any(p > 0 for p in percentages):
+                            wedges, texts, autotexts = ax2.pie(
+                                percentages,
+                                labels=labels,
+                                autopct='%1.1f%%',
+                                startangle=90,
+                                colors=['lightcoral', 'lightgreen', 'lightblue']
+                            )
+                            ax2.set_title('Percentage Distribution')
+                        else:
+                            ax2.axis('off')
+                    else:
+                        # Original bar chart code
+                        fig, ax = plt.subplots(figsize=(12, 8))
+                        labels = [str(b.get('key', f'Bucket {i}')) for i, b in enumerate(buckets)]
+                        counts = [b.get('doc_count', b.get('metrics', {}).get('count', 0))
+                                  for b in buckets]
+
+                        bars = ax.bar(labels, counts, color='steelblue', alpha=0.7)
+                        ax.set_xlabel(axis_labels['x_label'])
+                        ax.set_ylabel(axis_labels['y_label'])
+                        ax.set_title('Distribution by Bucket')
+                        ax.tick_params(axis='x', rotation=45)
+                        ax.grid(True, alpha=0.3)
+
+                        # Add value labels
+                        for bar in bars:
+                            height = bar.get_height()
+                            ax.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
+                                    f'{height:.0f}', ha='center', va='bottom')
         else:
             # Plot from flattened DataFrame
             fig, axes = plt.subplots(1, 2, figsize=(16, 8))
 
-            # Plot 1: Main distribution
+            # Check if we have percentage data
+            has_percentage = any('percentage' in col.lower() for col in df.columns)
+
+            # Plot 1: Main distribution (always bar chart)
             if 'bucket_key' in df.columns:
                 ax1 = axes[0]
                 if 'doc_count' in df.columns:
                     df_grouped = df.groupby('bucket_key')['doc_count'].sum().reset_index()
                     bars = ax1.bar(df_grouped['bucket_key'], df_grouped['doc_count'],
                                    color='steelblue', alpha=0.7)
-                    ax1.set_ylabel(axis_labels['y_label'])
+                    ax1.set_ylabel('Count')
                 elif 'metrics_count' in df.columns:
                     df_grouped = df.groupby('bucket_key')['metrics_count'].sum().reset_index()
                     bars = ax1.bar(df_grouped['bucket_key'], df_grouped['metrics_count'],
                                    color='steelblue', alpha=0.7)
-                    ax1.set_ylabel(axis_labels['y_label'])
+                    ax1.set_ylabel('Count')
 
                 ax1.set_xlabel(axis_labels['x_label'])
-                ax1.set_title('Distribution by Bucket')
+                ax1.set_title('Count Distribution')
                 ax1.tick_params(axis='x', rotation=45)
                 ax1.grid(True, alpha=0.3)
 
@@ -358,42 +400,51 @@ def visualize_opsearch_results(
                     ax1.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
                              f'{height:.0f}', ha='center', va='bottom')
 
-            # Plot 2: Sub-distribution if available
+            # Plot 2: Percentage or other data
             ax2 = axes[1]
-            dim_cols = [col for col in df.columns if
-                        col.startswith('dim_') and not col.endswith('_count') and not col.endswith('_percentage')]
+            if has_percentage:
+                # Find first percentage column
+                perc_col = next(col for col in df.columns if 'percentage' in col.lower())
 
-            if dim_cols:
-                for dim_col in dim_cols[:3]:  # Limit to 3 dimensions
-                    count_col = f"{dim_col}_count"
-                    if count_col in df.columns:
-                        dim_data = df.groupby(dim_col)[count_col].sum().reset_index()
-                        if len(dim_data) > 0:
-                            ax2.bar(dim_data[dim_col], dim_data[count_col],
-                                    alpha=0.6, label=dim_col.replace('dim_', ''))
+                if 'bucket_key' in df.columns:
+                    # Group by bucket_key and take first percentage value (assuming same for all rows in group)
+                    perc_data = df.groupby('bucket_key')[perc_col].first().reset_index()
 
-                ax2.set_xlabel('Dimension Values')
-                ax2.set_ylabel(axis_labels['y_label'])
-                ax2.set_title('Distribution by Dimension')
-                ax2.legend()
-                ax2.tick_params(axis='x', rotation=45)
-                ax2.grid(True, alpha=0.3)
+                    if len(perc_data) > 1:  # Need at least 2 values for pie chart
+                        wedges, texts, autotexts = ax2.pie(
+                            perc_data[perc_col],
+                            labels=perc_data['bucket_key'],
+                            autopct='%1.1f%%',
+                            startangle=90,
+                            colors=['lightcoral', 'lightgreen', 'lightblue']
+                        )
+                        ax2.set_title('Percentage Distribution')
+                    else:
+                        ax2.axis('off')
+                else:
+                    ax2.axis('off')
             else:
-                # Plot percentage if available
-                perc_cols = [col for col in df.columns if 'percentage' in col.lower()]
-                if perc_cols:
-                    for perc_col in perc_cols[:2]:
-                        if 'bucket_key' in df.columns:
-                            ax2.bar(df['bucket_key'], df[perc_col],
-                                    alpha=0.6, label=perc_col.replace('metrics_', '').replace('_', ' '))
-                    ax2.set_xlabel(axis_labels['x_label'])
-                    ax2.set_ylabel('Percentage')
-                    ax2.set_title('Percentage Distribution')
+                # Original code for non-percentage data
+                dim_cols = [col for col in df.columns if
+                            col.startswith('dim_') and not col.endswith('_count') and not col.endswith('_percentage')]
+
+                if dim_cols:
+                    for dim_col in dim_cols[:3]:  # Limit to 3 dimensions
+                        count_col = f"{dim_col}_count"
+                        if count_col in df.columns:
+                            dim_data = df.groupby(dim_col)[count_col].sum().reset_index()
+                            if len(dim_data) > 0:
+                                ax2.bar(dim_data[dim_col], dim_data[count_col],
+                                        alpha=0.6, label=dim_col.replace('dim_', ''))
+
+                    ax2.set_xlabel('Dimension Values')
+                    ax2.set_ylabel(axis_labels['y_label'])
+                    ax2.set_title('Distribution by Dimension')
                     ax2.legend()
                     ax2.tick_params(axis='x', rotation=45)
                     ax2.grid(True, alpha=0.3)
                 else:
-                    axes[1].axis('off')
+                    ax2.axis('off')
 
         plt.suptitle("Distribution Analysis", fontsize=16, fontweight='bold')
         plt.tight_layout()
@@ -555,15 +606,6 @@ def visualize_opsearch_results(
             ax.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
                     f'{height:.0f}', ha='center', va='bottom')
 
-        # Add cumulative line - REMOVED to eliminate line plot
-        # if len(counts) > 1:
-        #     ax2 = ax.twinx()
-        #     cumulative = np.cumsum(counts)
-        #     ax2.plot(range(len(cumulative)), cumulative, 'r-', marker='o',
-        #              linewidth=2, markersize=6, label='Cumulative')
-        #     ax2.set_ylabel('Cumulative Count', color='r')
-        #     ax2.tick_params(axis='y', labelcolor='r')
-
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
         plt.close()
@@ -712,6 +754,8 @@ def visualize_opsearch_results(
         # Determine chart type
         query_type = _extract_query_type()
         chart_type = _determine_chart_type(query_type, result_json)
+        print("chart_type######################################")
+        print(chart_type)
 
         # Create output path
         output_path = _create_output_path(chart_type)
