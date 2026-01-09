@@ -12,4 +12,4 @@ Compare the distribution of image quality across different camera models.
 
 
 按患者性别分析糖尿病视网膜病变和黄斑水肿的分布情况
-
+按患者性别分析糖尿病视网膜病变分布情况

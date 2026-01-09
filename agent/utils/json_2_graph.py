@@ -502,14 +502,31 @@ def visualize_opsearch_results(
         plt.close()
         return output_path
 
-    def _plot_gender_side_by_side(data: Dict, output_path: str) -> str:
+    def _plot_side_by_side(data: Dict, output_path: str) -> str:
+        """
+        嵌套两层 buckets 的并排柱图：
+        第一层（depth=1）当横轴，第二层（depth=2）当并排柱。
+        横纵坐标标签、图例标题均从 query_json 解析。
+        """
         import matplotlib.pyplot as plt
         import numpy as np
         from collections import defaultdict
 
+        # ---------- 1. 基础标签 ----------
         axis_labels = _extract_axis_labels()
 
-        # ---------- 1. 只扫两层：depth=1 当横轴，depth=2 当并排柱 ----------
+        # ---------- 2. 从 query_json 解析真正的字段名 ----------
+        config = query_json.get("query", {}).get("config", {})
+        dims = config.get("dimensions", [])
+        groups = config.get("groups", [])
+
+        outer_field = dims[0] if len(dims) > 0 else "group"
+        inner_field = dims[1] if len(dims) > 1 else groups[0] if groups else "subgroup"
+
+        outer_name = outer_field.replace("_", " ").title()
+        inner_name = inner_field.replace("_", " ").title()
+
+        # ---------- 3. 只扫两层 buckets ----------
         depth_buckets: Dict[int, List[Dict]] = defaultdict(list)
 
         def _scan_levels(node: Any, depth: int):
@@ -520,27 +537,24 @@ def visualize_opsearch_results(
                     for b in buckets:
                         _scan_levels(b, depth + 1)
 
-        # 入口：从每个顶层 bucket 开始，深度从 1 算起
         for b in data.get("buckets", []):
             _scan_levels(b, 1)
 
-        # 如果没抓到第二层，直接回退
+        # 如果没有第二层，直接回退
         if 2 not in depth_buckets:
             return _plot_distribution_bar(data, output_path)
 
-        # ---------- 2. 构造「外层 key -> 内层计数」映射 ----------
+        # ---------- 4. 构造「外层 key -> 内层计数」 ----------
         outer_order = [b["key"] for b in data.get("buckets", [])]  # 横轴顺序
         outer_inner_cnt: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
-        # 扫描 depth=1 节点，把「当前 bucket 的 key」作为外层 key 传下去
         for ob in data.get("buckets", []):
-            outer_key = ob.get("key")
+            ok = ob.get("key")
             if "sub_aggregations" in ob:
-                for inner_b in ob["sub_aggregations"].get("buckets", []):
-                    inner_key = str(inner_b.get("key"))
-                    outer_inner_cnt[outer_key][inner_key] += inner_b.get("doc_count", 0)
+                for ib in ob["sub_aggregations"].get("buckets", []):
+                    ik = str(ib.get("key"))
+                    outer_inner_cnt[ok][ik] += ib.get("doc_count", 0)
 
-        # 收集所有内层 key，用于配色图例
         inner_values = sorted({ik for v in outer_inner_cnt.values() for ik in v})
         n_outer = len(outer_order)
         n_inner = len(inner_values)
@@ -550,7 +564,7 @@ def visualize_opsearch_results(
             for i_idx, ik in enumerate(inner_values):
                 counts[o_idx, i_idx] = outer_inner_cnt[ok][ik]
 
-        # ---------- 3. 只有一张子图 ----------
+        # ---------- 5. 画图 ----------
         fig, ax = plt.subplots(figsize=(6, 5))
         x = np.arange(n_outer)
         width = 0.8 / n_inner
@@ -563,12 +577,12 @@ def visualize_opsearch_results(
                    color=colors[i_idx],
                    label=f'{inner_values[i_idx]}')
 
-        ax.set_xlabel('Group')
+        ax.set_xlabel(outer_name)
         ax.set_ylabel(axis_labels['y_label'])
-        ax.set_title('Nested distribution by group')
+        ax.set_title(f'{inner_name} distribution by {outer_name}')
         ax.set_xticks(x)
-        ax.set_xticklabels(outer_order)
-        ax.legend()
+        ax.set_xticklabels(outer_order, rotation=45, ha='right')
+        ax.legend(title=inner_name)
         ax.grid(axis='y', alpha=0.3)
 
         plt.tight_layout()
@@ -648,7 +662,7 @@ def visualize_opsearch_results(
             return _plot_pie_chart(result_json, output_path)
 
         elif chart_type == "nested_side_by_side":
-            return _plot_gender_side_by_side(result_json, output_path)
+            return _plot_side_by_side(result_json, output_path)
 
         else:  # Default to bar chart
             return _plot_distribution_bar(result_json, output_path)
