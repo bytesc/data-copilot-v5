@@ -77,43 +77,49 @@ def visualize_opsearch_results(
 
     def _determine_chart_type(query_type: str, data_structure: Dict) -> str:
         """Determine the most appropriate chart type based on data."""
+
         if query_type == "stats":
-            return ""
+            # For statistical calculations, use summary charts
+            if len(data_structure) > 1:
+                return "multi_metric_summary"
+            return "single_metric_summary"
 
-        if query_type == "distribution":
-            def _has_nested_buckets(obj: Any) -> bool:
-                """递归判断是否存在 sub_aggregations.buckets"""
-                if isinstance(obj, dict):
-                    if "sub_aggregations" in obj and "buckets" in obj["sub_aggregations"]:
-                        return True
-                    return any(_has_nested_buckets(v) for v in obj.values())
-                if isinstance(obj, list):
-                    return any(_has_nested_buckets(item) for item in obj)
-                return False
-
-            if _has_nested_buckets(data_structure):
-                return "nested_side_by_side"
-
+        elif query_type == "distribution":
+            # For distribution analysis
             if "buckets" in data_structure:
                 buckets = data_structure.get("buckets", [])
                 if buckets and isinstance(buckets, list):
+                    # Check for date histogram
+                    config = query_json.get("query", {}).get("config", {})
+                    if config.get("buckets"):
+                        for bucket in config["buckets"]:
+                            if bucket.get("type") == "date_histogram":
+                                return "time_series"
+
+                    # Check for multiple dimensions
                     if buckets and "dimensions" in buckets[0]:
                         first_bucket = buckets[0]
                         dimensions = first_bucket.get("dimensions", {})
                         if dimensions and len(dimensions) > 1:
                             return "stacked_bar"
                         return "grouped_bar"
+
+                    # Check for range buckets
                     if "from" in buckets[0] or "to" in buckets[0]:
                         return "histogram"
+
+                    # Check for grouped data
                     if "groups" in buckets[0]:
                         return "grouped_bar"
-                    return "bar"
-                if any("%" in str(key).lower() or "percentage" in str(key).lower()
-                       for key in data_structure.keys()):
-                    return "pie"
-            return "bar"
 
-        return "bar"
+                    return "bar"
+
+            # Check for percentage data
+            if any("%" in str(key).lower() or "percentage" in str(key).lower()
+                   for key in data_structure.keys()):
+                return "pie"
+
+        return "bar"  # Default fallback
 
     def _flatten_distribution_data(data: Dict) -> pd.DataFrame:
         """Flatten nested distribution data into a DataFrame."""
@@ -163,6 +169,109 @@ def visualize_opsearch_results(
                     flattened_data.append(row)
 
         return pd.DataFrame(flattened_data)
+
+    def _plot_stats_summary(data: Dict, output_path: str) -> str:
+        """Plot statistical summary charts."""
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle("Statistical Summary Analysis", fontsize=16, fontweight='bold')
+
+        # Convert to DataFrame for easier handling
+        stats_df = pd.DataFrame(data).T
+
+        # 1. Summary Metrics Bar Chart
+        ax1 = axes[0, 0]
+        metrics_to_plot = ['min', 'max', 'avg', 'median', 'q1', 'q3']
+        available_metrics = [m for m in metrics_to_plot if m in stats_df.columns]
+
+        if available_metrics:
+            metric_data = stats_df[available_metrics]
+            x = np.arange(len(stats_df))
+            width = 0.15
+
+            for i, metric in enumerate(available_metrics):
+                values = metric_data[metric].values
+                ax1.bar(x + i * width - width * (len(available_metrics) - 1) / 2,
+                        values, width, label=metric.replace('_', ' ').title())
+
+            ax1.set_xlabel('Fields')
+            ax1.set_ylabel('Values')
+            ax1.set_title('Key Statistics by Field')
+            ax1.set_xticks(x)
+            ax1.set_xticklabels(stats_df.index, rotation=45, ha='right')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+
+        # 2. Count Chart
+        ax2 = axes[0, 1]
+        if 'count' in stats_df.columns:
+            ax2.bar(stats_df.index, stats_df['count'])
+            ax2.set_xlabel('Fields')
+            ax2.set_ylabel('Count')
+            ax2.set_title('Document Count by Field')
+            ax2.tick_params(axis='x', rotation=45)
+            ax2.grid(True, alpha=0.3)
+
+            # Add value labels
+            for i, v in enumerate(stats_df['count']):
+                ax2.text(i, v, str(int(v)), ha='center', va='bottom')
+
+        # 3. Spread Indicators
+        ax3 = axes[1, 0]
+        spread_metrics = ['std_deviation', 'variance']
+        available_spread = [m for m in spread_metrics if m in stats_df.columns]
+
+        if available_spread:
+            spread_data = stats_df[available_spread]
+            x = np.arange(len(stats_df))
+            width = 0.35
+
+            for i, metric in enumerate(available_spread):
+                values = spread_data[metric].values
+                ax3.bar(x + i * width - width / 2, values, width,
+                        label=metric.replace('_', ' ').title())
+
+            ax3.set_xlabel('Fields')
+            ax3.set_ylabel('Spread Value')
+            ax3.set_title('Data Spread Indicators')
+            ax3.set_xticks(x)
+            ax3.set_xticklabels(stats_df.index, rotation=45, ha='right')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+
+        # 4. Summary Table
+        ax4 = axes[1, 1]
+        ax4.axis('tight')
+        ax4.axis('off')
+
+        # Prepare table data
+        table_data = []
+        for field in stats_df.index:
+            row = [field]
+            for metric in ['count', 'min', 'max', 'avg', 'median']:
+                if metric in stats_df.columns:
+                    value = stats_df.loc[field, metric]
+                    if isinstance(value, (int, np.integer)):
+                        row.append(f"{value:,}")
+                    elif isinstance(value, float):
+                        row.append(f"{value:.2f}")
+                    else:
+                        row.append(str(value))
+                else:
+                    row.append("")
+            table_data.append(row)
+
+        columns = ['Field', 'Count', 'Min', 'Max', 'Avg', 'Median']
+        table = ax4.table(cellText=table_data, colLabels=columns,
+                          loc='center', cellLoc='center')
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.5)
+        ax4.set_title('Statistical Summary', pad=20)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        return output_path
 
     def _plot_distribution_bar(data: Dict, output_path: str) -> str:
         """Plot bar chart for distribution data."""
@@ -502,75 +611,92 @@ def visualize_opsearch_results(
         plt.close()
         return output_path
 
-    def _plot_gender_side_by_side(data: Dict, output_path: str) -> str:
-        import matplotlib.pyplot as plt
-        import numpy as np
-        from collections import defaultdict
-
+    def _plot_time_series(data: Dict, output_path: str) -> str:
+        """Plot time series data."""
+        # Extract axis labels from query JSON
         axis_labels = _extract_axis_labels()
 
-        # ---------- 1. 只扫两层：depth=1 当横轴，depth=2 当并排柱 ----------
-        depth_buckets: Dict[int, List[Dict]] = defaultdict(list)
+        buckets = data.get('buckets', [])
 
-        def _scan_levels(node: Any, depth: int):
-            if isinstance(node, dict) and "sub_aggregations" in node:
-                buckets = node["sub_aggregations"].get("buckets", [])
-                if buckets:
-                    depth_buckets[depth].extend(buckets)
-                    for b in buckets:
-                        _scan_levels(b, depth + 1)
-
-        # 入口：从每个顶层 bucket 开始，深度从 1 算起
-        for b in data.get("buckets", []):
-            _scan_levels(b, 1)
-
-        # 如果没抓到第二层，直接回退
-        if 2 not in depth_buckets:
+        if not buckets:
             return _plot_distribution_bar(data, output_path)
 
-        # ---------- 2. 构造「外层 key -> 内层计数」映射 ----------
-        outer_order = [b["key"] for b in data.get("buckets", [])]  # 横轴顺序
-        outer_inner_cnt: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        fig, axes = plt.subplots(1, 2, figsize=(16, 8))
 
-        # 扫描 depth=1 节点，把「当前 bucket 的 key」作为外层 key 传下去
-        for ob in data.get("buckets", []):
-            outer_key = ob.get("key")
-            if "sub_aggregations" in ob:
-                for inner_b in ob["sub_aggregations"].get("buckets", []):
-                    inner_key = str(inner_b.get("key"))
-                    outer_inner_cnt[outer_key][inner_key] += inner_b.get("doc_count", 0)
+        # Extract time series data
+        timestamps = []
+        counts = []
+        metrics = {}
 
-        # 收集所有内层 key，用于配色图例
-        inner_values = sorted({ik for v in outer_inner_cnt.values() for ik in v})
-        n_outer = len(outer_order)
-        n_inner = len(inner_values)
-        counts = np.zeros((n_outer, n_inner))
+        for bucket in buckets:
+            key = bucket.get('key', '')
+            timestamps.append(key)
+            count = bucket.get('doc_count', bucket.get('metrics', {}).get('count', 0))
+            counts.append(count)
 
-        for o_idx, ok in enumerate(outer_order):
-            for i_idx, ik in enumerate(inner_values):
-                counts[o_idx, i_idx] = outer_inner_cnt[ok][ik]
+            # Extract other metrics
+            bucket_metrics = bucket.get('metrics', {})
+            for metric_name, metric_value in bucket_metrics.items():
+                if metric_name != 'count' and metric_name != 'percentage':
+                    if metric_name not in metrics:
+                        metrics[metric_name] = []
+                    metrics[metric_name].append(metric_value)
 
-        # ---------- 3. 只有一张子图 ----------
-        fig, ax = plt.subplots(figsize=(6, 5))
-        x = np.arange(n_outer)
-        width = 0.8 / n_inner
-        colors = plt.cm.tab10(np.linspace(0, 1, n_inner))
+        # Plot 1: Count over time - CHANGED FROM LINE TO BAR CHART
+        ax1 = axes[0]
+        x_pos = range(len(timestamps))
 
-        for i_idx in range(n_inner):
-            ax.bar(x + width * (i_idx - (n_inner - 1) / 2),
-                   counts[:, i_idx],
-                   width,
-                   color=colors[i_idx],
-                   label=f'{inner_values[i_idx]}')
+        bars = ax1.bar(x_pos, counts, color='steelblue', alpha=0.7)
+        ax1.set_xlabel(axis_labels['x_label'])
+        ax1.set_ylabel(axis_labels['y_label'])
+        ax1.set_title('Time Series - Count')
+        ax1.set_xticks(x_pos)
+        ax1.set_xticklabels(timestamps, rotation=45, ha='right')
+        ax1.tick_params(axis='y', labelcolor='steelblue')
+        ax1.grid(True, alpha=0.3, axis='y')
 
-        ax.set_xlabel('Group')
-        ax.set_ylabel(axis_labels['y_label'])
-        ax.set_title('Nested distribution by group')
-        ax.set_xticks(x)
-        ax.set_xticklabels(outer_order)
-        ax.legend()
-        ax.grid(axis='y', alpha=0.3)
+        # Add value labels
+        for bar in bars:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
+                     f'{height:.0f}', ha='center', va='bottom', fontsize=8)
 
+        # Plot 2: Other metrics over time - CHANGED FROM LINE TO BAR CHART
+        ax2 = axes[1]
+
+        if metrics:
+            # Use bar chart instead of line plot for metrics
+            metric_names = list(metrics.keys())
+            if metric_names:
+                # Group bar chart for multiple metrics
+                x = np.arange(len(timestamps))
+                width = 0.8 / len(metric_names)
+
+                for i, metric_name in enumerate(metric_names):
+                    values = metrics[metric_name]
+                    if len(values) == len(timestamps):
+                        ax2.bar(x + i * width - width * (len(metric_names) - 1) / 2, values, width,
+                                label=metric_name.replace('_', ' ').title())
+
+                ax2.set_xlabel(axis_labels['x_label'])
+                ax2.set_ylabel('Metric Value')
+                ax2.set_title('Time Series - Metrics')
+                ax2.set_xticks(x)
+                ax2.set_xticklabels(timestamps, rotation=45, ha='right')
+                ax2.legend()
+                ax2.grid(True, alpha=0.3)
+        else:
+            # Use bar chart for cumulative count instead of line plot
+            cumulative = np.cumsum(counts)
+            ax2.bar(x_pos, cumulative, color='lightcoral', alpha=0.7)
+            ax2.set_xlabel(axis_labels['x_label'])
+            ax2.set_ylabel('Cumulative Count')
+            ax2.set_title('Cumulative Count Over Time')
+            ax2.set_xticks(x_pos)
+            ax2.set_xticklabels(timestamps, rotation=45, ha='right')
+            ax2.grid(True, alpha=0.3)
+
+        plt.suptitle("Time Series Analysis", fontsize=16, fontweight='bold')
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
         plt.close()
@@ -635,10 +761,14 @@ def visualize_opsearch_results(
         output_path = _create_output_path(chart_type)
 
         # Select and call appropriate plot function
-        if chart_type == "" :
+        if chart_type == "single_metric_summary" or chart_type == "multi_metric_summary":
+            # return _plot_stats_summary(result_json, output_path)
             return ""
 
-        if chart_type == "histogram":
+        elif chart_type == "time_series":
+            return _plot_time_series(result_json, output_path)
+
+        elif chart_type == "histogram":
             return _plot_histogram(result_json, output_path)
 
         elif chart_type == "grouped_bar" or chart_type == "stacked_bar":
@@ -646,9 +776,6 @@ def visualize_opsearch_results(
 
         elif chart_type == "pie":
             return _plot_pie_chart(result_json, output_path)
-
-        elif chart_type == "nested_side_by_side":
-            return _plot_gender_side_by_side(result_json, output_path)
 
         else:  # Default to bar chart
             return _plot_distribution_bar(result_json, output_path)
@@ -669,6 +796,70 @@ def visualize_opsearch_results(
 
 
 if __name__ == "__main__":
+    # Example 1: Basic statistical calculation (stats type)
+    print("Example 1: Basic statistical calculation")
+    query_stats = {
+        "query": {
+            "type": "stats",
+            "config": {
+                "fields": ["age", "salary", "blood_pressure", "cholesterol"],
+                "metrics": ["min", "max", "avg", "median", "q1", "q3", "std_deviation", "count"],
+                "filters": [
+                    {
+                        "field": "gender",
+                        "operator": "eq",
+                        "value": "male"
+                    }
+                ]
+            }
+        }
+    }
+
+    result_stats = {
+        "age": {
+            "count": 1000,
+            "min": 18,
+            "max": 80,
+            "avg": 45.5,
+            "median": 45.0,
+            "q1": 30.0,
+            "q3": 60.0,
+            "std_deviation": 15.2
+        },
+        "salary": {
+            "count": 1000,
+            "min": 3000,
+            "max": 50000,
+            "avg": 15000.5,
+            "median": 12000.0,
+            "q1": 8000.0,
+            "q3": 20000.0,
+            "std_deviation": 8000.5
+        },
+        "blood_pressure": {
+            "count": 800,
+            "min": 90,
+            "max": 180,
+            "avg": 120.5,
+            "median": 118.0,
+            "q1": 110.0,
+            "q3": 130.0,
+            "std_deviation": 12.3
+        },
+        "cholesterol": {
+            "count": 750,
+            "min": 120,
+            "max": 280,
+            "avg": 195.2,
+            "median": 192.0,
+            "q1": 170.0,
+            "q3": 215.0,
+            "std_deviation": 25.8
+        }
+    }
+
+    image_path1 = visualize_opsearch_results(query_stats, result_stats, "./examples")
+    print(f"Stats chart saved to: {image_path1}")
 
     # Example 2: Simple distribution with percentage (gender distribution)
     print("\nExample 2: Gender distribution with percentages")
@@ -835,6 +1026,95 @@ if __name__ == "__main__":
     image_path3 = visualize_opsearch_results(query_multi_dim, result_multi_dim, "./examples")
     print(f"Multi-dimensional chart saved to: {image_path3}")
 
+    # Example 4: Time series analysis (monthly disease trends)
+    print("\nExample 4: Time series analysis - monthly disease trends")
+    query_time_series = {
+        "query": {
+            "type": "distribution",
+            "config": {
+                "dimensions": ["disease_type"],
+                "buckets": [
+                    {
+                        "type": "date_histogram",
+                        "field": "diagnosis_date",
+                        "interval": "1M",
+                        "format": "yyyy-MM"
+                    }
+                ],
+                "metrics": ["count", "avg"],
+                "metrics_field": "treatment_cost",
+                "filters": [
+                    {
+                        "field": "diagnosis_date",
+                        "operator": "range",
+                        "value": {
+                            "gte": "2023-01-01",
+                            "lte": "2023-12-31"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    result_time_series = {
+        "buckets": [
+            {
+                "key": "2023-01",
+                "doc_count": 120,
+                "dimensions": {
+                    "disease_type": {
+                        "buckets": [
+                            {"key": "Diabetes", "doc_count": 45, "metrics": {"avg": 1250.50}},
+                            {"key": "Hypertension", "doc_count": 60, "metrics": {"avg": 850.75}},
+                            {"key": "Asthma", "doc_count": 15, "metrics": {"avg": 320.25}}
+                        ]
+                    }
+                },
+                "metrics": {
+                    "count": 120,
+                    "avg": 950.25
+                }
+            },
+            {
+                "key": "2023-02",
+                "doc_count": 135,
+                "dimensions": {
+                    "disease_type": {
+                        "buckets": [
+                            {"key": "Diabetes", "doc_count": 50, "metrics": {"avg": 1280.30}},
+                            {"key": "Hypertension", "doc_count": 65, "metrics": {"avg": 870.40}},
+                            {"key": "Asthma", "doc_count": 20, "metrics": {"avg": 315.80}}
+                        ]
+                    }
+                },
+                "metrics": {
+                    "count": 135,
+                    "avg": 965.45
+                }
+            },
+            {
+                "key": "2023-03",
+                "doc_count": 140,
+                "dimensions": {
+                    "disease_type": {
+                        "uckets": [
+                            {"key": "Diabetes", "doc_count": 55, "metrics": {"avg": 1300.75}},
+                            {"key": "Hypertension", "doc_count": 65, "metrics": {"avg": 880.20}},
+                            {"key": "Asthma", "doc_count": 20, "metrics": {"avg": 325.60}}
+                        ]
+                    }
+                },
+                "metrics": {
+                    "count": 140,
+                    "avg": 985.30
+                }
+            }
+        ]
+    }
+
+    image_path4 = visualize_opsearch_results(query_time_series, result_time_series, "./examples")
+    print(f"Time series chart saved to: {image_path4}")
 
     # Example 5: Simple percentage distribution (disease prevalence)
     print("\nExample 5: Simple percentage distribution - disease prevalence")
@@ -961,7 +1241,9 @@ if __name__ == "__main__":
 
     print(f"\nAll charts saved to ./examples directory")
     print(f"Generated charts:")
+    print(f"1. Statistical summary: {image_path1}")
     print(f"2. Gender percentage: {image_path2}")
     print(f"3. Multi-dimensional: {image_path3}")
+    print(f"4. Time series: {image_path4}")
     print(f"5. Disease prevalence: {image_path5}")
     print(f"6. Complex aggregation: {image_path6}")

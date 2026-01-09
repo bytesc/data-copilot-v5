@@ -15,10 +15,11 @@ def main():
         if question.strip():
             with put_loading(shape="grow", color="primary"):
                 try:
-                    answer, img_path = query_agent(question, with_exp=True, img=True)
+                    answer, img_path = query_agent(question, with_exp=False, img=True)
                     put_markdown(f"**Query Result:**")
                     put_markdown(answer)
-                    put_image(open(img_path, 'rb').read())
+                    if img_path!="":
+                        put_image(open(img_path, 'rb').read())
                 except Exception as e:
                     put_text(f"Query error: {str(e)}")
 
