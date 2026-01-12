@@ -11,5 +11,11 @@ Analyze the co-morbidity between diabetic retinopathy and other eye diseases (ma
 Compare the distribution of image quality across different camera models.
 
 Analyze patient distribution by age group and diabetic retinopathy grade.
+
 按患者性别分析糖尿病视网膜病变分布情况
+
 分析糖尿病视网膜病性别分布情况
+
+分析整个数据集的性别比例
+
+查询50-60岁的人是否患有糖网的比例
