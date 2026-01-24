@@ -171,6 +171,20 @@ For range grouping of numerical fields
 }
 ```
 
+> ⚠️ **Single-point range filtering**  
+> When you only need to query a single age band (e.g. 60–70), **use a `filters` clause** instead of creating a one-interval `range` bucket.  
+> Buckets require **at least two intervals** to produce valid aggregations; a single-interval bucket will return empty or misleading results.  
+> Example – correct way to restrict the whole query to 60 ≤ age < 70:
+> ```json
+> "filters": [
+>   {
+>     "field": "age",
+>     "operator": "range",
+>     "value": { "gte": 60, "lt": 70 }
+>   }
+> ]
+> ```
+
 #### 4.2.3 Date Histogram Bucket (date_histogram)
 For time-based bucketing analysis
 
