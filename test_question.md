@@ -19,3 +19,7 @@ Analyze patient distribution by age group and diabetic retinopathy grade.
 分析整个数据集的性别比例
 
 查询50-60岁的人是否患有糖网的比例
+
+不同糖尿病病程区间和相机型号下，黄斑水肿的风险
+
+看看左眼/右眼在不同照明质量下，出现视网膜出血的风险分布
